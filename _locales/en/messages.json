@@ -12154,7 +12154,159 @@
     "description": "General setting to choose the provider for the Sig chat assistant"
   },
   "icu:SigDemoAgent--inference-description": {
-    "messageformat": "Choose what powers Sig on this Mac. Your @sig question and up to 12 recent text messages from that chat are shared with the selected provider. Mesh web search queries are sent to Brave; ChatGPT uses OpenAI web search.",
+    "messageformat": "Choose what powers Sig on this Mac. Paid mesh inference uses your Wallet with a daily budget of ₿500. Your @sig question and up to 12 recent text messages from that chat are shared with the selected provider. Mesh web search queries are sent to Brave; ChatGPT uses OpenAI web search.",
     "description": "Description of the per-device inference setting for Sig"
+  },
+  "icu:SigDemoWallet--title": {
+    "messageformat": "Wallet",
+    "description": "Sig demo Lightning Wallet settings: title"
+  },
+  "icu:SigDemoWallet--description": {
+    "messageformat": "Fund your Lightning wallet to use mesh-llm (paid).",
+    "description": "Sig demo Lightning Wallet settings: description"
+  },
+  "icu:SigDemoWallet--refresh": {
+    "messageformat": "Refresh",
+    "description": "Sig demo Lightning Wallet settings: refresh"
+  },
+  "icu:SigDemoWallet--loading": {
+    "messageformat": "Loading wallet…",
+    "description": "Sig demo Lightning Wallet settings: loading"
+  },
+  "icu:SigDemoWallet--unavailable": {
+    "messageformat": "Wallet details are unavailable.",
+    "description": "Sig demo Lightning Wallet settings: unavailable"
+  },
+  "icu:SigDemoWallet--load-error": {
+    "messageformat": "Could not update your wallet. Try refreshing.",
+    "description": "Sig demo Lightning Wallet settings: load-error"
+  },
+  "icu:SigDemoWallet--fund-error": {
+    "messageformat": "Could not create an invoice. Try again.",
+    "description": "Sig demo Lightning Wallet settings: fund-error"
+  },
+  "icu:SigDemoWallet--copy-error": {
+    "messageformat": "Could not copy the invoice. You can select and copy it below.",
+    "description": "Sig demo Lightning Wallet settings: copy-error"
+  },
+  "icu:SigDemoWallet--balance": {
+    "messageformat": "Balance",
+    "description": "Sig demo Lightning Wallet settings: balance"
+  },
+  "icu:SigDemoWallet--spendable": {
+    "messageformat": "Spendable balance",
+    "description": "Sig demo Lightning Wallet settings: spendable"
+  },
+  "icu:SigDemoWallet--available-for-inference": {
+    "messageformat": "Available for inference",
+    "description": "Sig demo Lightning Wallet settings: available-for-inference"
+  },
+  "icu:SigDemoWallet--daily-budget": {
+    "messageformat": "Daily spending budget",
+    "description": "Sig demo Lightning Wallet settings: daily-budget"
+  },
+  "icu:SigDemoWallet--remaining-budget": {
+    "messageformat": "Remaining today",
+    "description": "Sig demo Lightning Wallet settings: remaining-budget"
+  },
+  "icu:SigDemoWallet--automatic-policy": {
+    "messageformat": "Paid inference uses your wallet automatically, up to this daily budget.",
+    "description": "Sig demo Lightning Wallet settings: automatic-policy"
+  },
+  "icu:SigDemoWallet--free-policy": {
+    "messageformat": "Automatic spending is off",
+    "description": "Sig demo Lightning Wallet settings: free-policy"
+  },
+  "icu:SigDemoWallet--paid-description": {
+    "messageformat": "Choose mesh-llm (paid) in General → Inference to use your wallet.",
+    "description": "Sig demo Lightning Wallet settings: paid-description"
+  },
+  "icu:SigDemoWallet--fund-title": {
+    "messageformat": "Fund wallet",
+    "description": "Sig demo Lightning Wallet settings: fund-title"
+  },
+  "icu:SigDemoWallet--amount": {
+    "messageformat": "Amount (₿)",
+    "description": "Sig demo Lightning Wallet settings: amount"
+  },
+  "icu:SigDemoWallet--invalid-amount": {
+    "messageformat": "Enter a positive whole number.",
+    "description": "Sig demo Lightning Wallet settings: invalid-amount"
+  },
+  "icu:SigDemoWallet--creating-invoice": {
+    "messageformat": "Creating invoice…",
+    "description": "Sig demo Lightning Wallet settings: creating-invoice"
+  },
+  "icu:SigDemoWallet--fund": {
+    "messageformat": "Fund wallet",
+    "description": "Sig demo Lightning Wallet settings: fund"
+  },
+  "icu:SigDemoWallet--invoice-paid": {
+    "messageformat": "Payment received. Your balance has been updated.",
+    "description": "Sig demo Lightning Wallet settings: invoice-paid"
+  },
+  "icu:SigDemoWallet--invoice-expired": {
+    "messageformat": "This invoice has expired. Generate a new invoice to fund your wallet.",
+    "description": "Sig demo Lightning Wallet settings: invoice-expired"
+  },
+  "icu:SigDemoWallet--invoice-failed": {
+    "messageformat": "This payment failed. Generate a new invoice to try again.",
+    "description": "Sig demo Lightning Wallet settings: invoice-failed"
+  },
+  "icu:SigDemoWallet--invoice-pending": {
+    "messageformat": "Waiting for payment…",
+    "description": "Sig demo Lightning Wallet settings: invoice-pending"
+  },
+  "icu:SigDemoWallet--invoice-qr": {
+    "messageformat": "Lightning invoice QR code",
+    "description": "Sig demo Lightning Wallet settings: invoice-qr"
+  },
+  "icu:SigDemoWallet--invoice-expires": {
+    "messageformat": "Expires {time}",
+    "description": "Sig demo Lightning Wallet settings: invoice-expires"
+  },
+  "icu:SigDemoWallet--invoice": {
+    "messageformat": "Lightning invoice",
+    "description": "Sig demo Lightning Wallet settings: invoice"
+  },
+  "icu:SigDemoWallet--copied": {
+    "messageformat": "Copied",
+    "description": "Sig demo Lightning Wallet settings: copied"
+  },
+  "icu:SigDemoWallet--copy-invoice": {
+    "messageformat": "Copy invoice",
+    "description": "Sig demo Lightning Wallet settings: copy-invoice"
+  },
+  "icu:SigDemoWallet--history": {
+    "messageformat": "Transaction history",
+    "description": "Sig demo Lightning Wallet settings: history"
+  },
+  "icu:SigDemoWallet--no-transactions": {
+    "messageformat": "No transactions yet",
+    "description": "Sig demo Lightning Wallet settings: no-transactions"
+  },
+  "icu:SigDemoWallet--received": {
+    "messageformat": "Received",
+    "description": "Sig demo Lightning Wallet settings: received"
+  },
+  "icu:SigDemoWallet--sent": {
+    "messageformat": "Sent",
+    "description": "Sig demo Lightning Wallet settings: sent"
+  },
+  "icu:SigDemoWallet--succeeded": {
+    "messageformat": "Completed",
+    "description": "Sig demo Lightning Wallet settings: succeeded"
+  },
+  "icu:SigDemoWallet--failed": {
+    "messageformat": "Failed",
+    "description": "Sig demo Lightning Wallet settings: failed"
+  },
+  "icu:SigDemoWallet--pending": {
+    "messageformat": "Pending",
+    "description": "Sig demo Lightning Wallet settings: pending"
+  },
+  "icu:SigDemoWallet--less-than-one": {
+    "messageformat": "Less than ₿1",
+    "description": "Sig demo Lightning Wallet settings: less-than-one"
   }
 }

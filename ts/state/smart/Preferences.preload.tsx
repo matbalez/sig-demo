@@ -137,6 +137,8 @@ import { useGlobalModalActions } from '../ducks/globalModals.preload.ts';
 import { maybeUpdateRegistrationLock } from '../../util/registrationLock.preload.ts';
 import { disableSignalPin } from '../../util/disableSignalPin.preload.ts';
 import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../../types/SigDemoAgent.std.ts';
+import { configureSigDemoInferenceProvider } from '../../services/sigDemoAgentClient.preload.ts';
+import { SmartPreferencesSigDemoWallet } from './PreferencesSigDemoWallet.preload.tsx';
 
 const RESETTABLE_GLOBAL_NOTIFICATION_ITEMS = [
   ...Object.values(NOTIFY_WHILE_MUTED_FIELDS),
@@ -175,6 +177,10 @@ function renderNotificationProfilesCreateFlow(
 
 function renderProfileEditor(): JSX.Element {
   return <SmartProfileEditor />;
+}
+
+function renderSigDemoWallet(): JSX.Element {
+  return <SmartPreferencesSigDemoWallet />;
 }
 
 function renderDonationsPane({
@@ -691,7 +697,10 @@ export function SmartPreferences(): JSX.Element | null {
   const [sigDemoInferenceProvider, onSigDemoInferenceProviderChange] =
     createItemsAccess(
       'sigDemoInferenceProvider',
-      SIG_DEMO_DEFAULT_INFERENCE_PROVIDER
+      SIG_DEMO_DEFAULT_INFERENCE_PROVIDER,
+      provider => {
+        drop(configureSigDemoInferenceProvider(provider));
+      }
     );
 
   const [hasLinkPreviews, onLinkPreviewsChange] = createItemsAccess(
@@ -1220,6 +1229,7 @@ export function SmartPreferences(): JSX.Element | null {
         removeCustomColorOnConversations={removeCustomColorOnConversations}
         removeCustomColor={removeCustomColor}
         renderDonationsPane={renderDonationsPane}
+        renderSigDemoWallet={renderSigDemoWallet}
         renderNotificationProfilesHome={renderNotificationProfilesHome}
         renderNotificationProfilesCreateFlow={
           renderNotificationProfilesCreateFlow

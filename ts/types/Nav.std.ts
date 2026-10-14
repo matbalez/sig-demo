@@ -69,6 +69,7 @@ export enum SettingsPage {
   Profile = 'Profile',
   Account = 'Account',
   General = 'General',
+  SigDemoWallet = 'SigDemoWallet',
   Donations = 'Donations',
   Appearance = 'Appearance',
   Chats = 'Chats',

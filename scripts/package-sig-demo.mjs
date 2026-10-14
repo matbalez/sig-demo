@@ -21,7 +21,7 @@ const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE]\nBuilds sig demo with its Rust chat helper, mesh-llm sidecar, and approved demo credentials; no publishing or notarization.'
+    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE] [--paid-mesh-config-file FILE]\nBuilds sig demo with its Rust chat helper, mesh-llm sidecar, and approved private demo configuration; no publishing or notarization.'
   );
   process.exit(0);
 }
@@ -29,6 +29,8 @@ let configPath = resolve(root, '.sig-demo/client.json');
 let arch = process.arch;
 let agentKeyPath = resolve(root, '.sig-demo/agent.env');
 let braveKeyPath = resolve(root, '.sig-demo/brave.env');
+let paidMeshConfigPath = resolve(root, '.sig-demo/mesh-paid.json');
+let paidMeshConfigRequired = false;
 for (let index = 0; index < args.length; index += 1) {
   if (args[index] === '--config' && args[index + 1]) {
     configPath = resolve(args[index + 1]);
@@ -41,6 +43,10 @@ for (let index = 0; index < args.length; index += 1) {
     index += 1;
   } else if (args[index] === '--brave-key-file' && args[index + 1]) {
     braveKeyPath = resolve(args[index + 1]);
+    index += 1;
+  } else if (args[index] === '--paid-mesh-config-file' && args[index + 1]) {
+    paidMeshConfigPath = resolve(args[index + 1]);
+    paidMeshConfigRequired = true;
     index += 1;
   } else {
     throw new Error(`Unknown or incomplete argument: ${args[index]}`);
@@ -182,6 +188,33 @@ writeFileSync(
   `${JSON.stringify({ apiKey, braveApiKey, model: 'gpt-6-luna' })}\n`,
   { mode: 0o600 }
 );
+// The unlisted mesh invitation belongs only in private build resources. Never
+// bake it into node-config (which is logged) or public source/generated assets.
+let paidMeshResources;
+if (existsSync(paidMeshConfigPath)) {
+  if (
+    !lstatSync(paidMeshConfigPath).isFile() ||
+    lstatSync(paidMeshConfigPath).isSymbolicLink()
+  ) {
+    throw new Error('The private paid mesh configuration is unusable.');
+  }
+  const paid = JSON.parse(readFileSync(paidMeshConfigPath, 'utf8'));
+  if (
+    typeof paid.inviteToken !== 'string' ||
+    !/^[a-zA-Z0-9_-]{20,16384}$/.test(paid.inviteToken) ||
+    paid.model !== 'Qwen3.6-27B-Q6_K'
+  ) {
+    throw new Error('The private paid mesh configuration is unusable.');
+  }
+  paidMeshResources = resolve(buildRoot, 'paid-mesh.json');
+  writeFileSync(
+    paidMeshResources,
+    `${JSON.stringify({ inviteToken: paid.inviteToken, model: paid.model })}\n`,
+    { mode: 0o600 }
+  );
+} else if (paidMeshConfigRequired) {
+  throw new Error('The private paid mesh configuration is missing.');
+}
 const builderConfigPath = resolve(buildRoot, 'builder-config.json');
 // A supplied config file replaces package.json's build section. Copy every
 // public build setting so the demo identity, icon, file list, and fuses survive.
@@ -197,6 +230,9 @@ writeFileSync(
       ...(packageBuild.extraResources ?? []),
       { from: agentResources, to: 'sig-demo-agent' },
       { from: meshResources, to: 'sig-demo-mesh' },
+      ...(paidMeshResources
+        ? [{ from: paidMeshResources, to: 'sig-demo-mesh/paid.json' }]
+        : []),
       {
         from: resolve(root, 'sig-demo/mesh/LICENSE'),
         to: 'sig-demo-mesh/LICENSE',

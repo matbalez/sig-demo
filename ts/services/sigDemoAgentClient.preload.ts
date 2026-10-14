@@ -7,10 +7,36 @@ import type {
   SigDemoAgentEventType,
   SigDemoAgentRunRequestType,
   SigDemoAgentStatusType,
+  SigDemoInferenceProviderType,
 } from '../types/SigDemoAgent.std.ts';
 import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../types/SigDemoAgent.std.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
 import { drop } from '../util/drop.std.ts';
+import { createLogger } from '../logging/log.std.ts';
+
+const log = createLogger('sig demo inference');
+
+/** Sync persisted selection before startup preparation and when it changes. */
+export async function configureSigDemoInferenceProvider(
+  provider: SigDemoInferenceProviderType
+): Promise<void> {
+  if (!window.SignalContext.config.sigDemoEnabled) {
+    return;
+  }
+  try {
+    const result: { ok: boolean; error?: string } = await ipcRenderer.invoke(
+      'sig-demo-agent:configure',
+      provider
+    );
+    if (!result.ok) {
+      // Query-time and wallet UI errors are actionable. Do not block normal
+      // messaging because background mesh preparation is unavailable.
+      log.info('Selected inference provider is not ready');
+    }
+  } catch {
+    log.info('Selected inference provider could not be prepared');
+  }
+}
 
 /** Only a locally submitted query calls this; received messages never run GDK. */
 export async function streamSigDemoAgent(

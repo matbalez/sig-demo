@@ -59,6 +59,8 @@ import {
 import { initialize as initializeUnreadReminderService } from './services/unreadReminders.preload.ts';
 import { tapToViewMessagesDeletionService } from './services/tapToViewMessagesDeletionService.preload.ts';
 import { senderCertificateService } from './services/senderCertificate.preload.ts';
+import { configureSigDemoInferenceProvider } from './services/sigDemoAgentClient.preload.ts';
+import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from './types/SigDemoAgent.std.ts';
 import {
   GROUP_CREDENTIALS_KEY,
   initializeGroupCredentialFetcher,
@@ -557,6 +559,17 @@ async function startApp(): Promise<void> {
       return;
     }
     first = false;
+
+    if (window.SignalContext.config.sigDemoEnabled) {
+      drop(
+        configureSigDemoInferenceProvider(
+          itemStorage.get(
+            'sigDemoInferenceProvider',
+            SIG_DEMO_DEFAULT_INFERENCE_PROVIDER
+          )
+        )
+      );
+    }
 
     restoreRemoteConfigFromStorage({
       storage: itemStorage,

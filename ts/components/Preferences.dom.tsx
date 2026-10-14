@@ -260,6 +260,7 @@ export type PropsDataType = {
 
 type PropsFunctionType = {
   // Render props
+  renderSigDemoWallet: () => JSX.Element;
   renderDonationsPane: (options: {
     contentsRef: MutableRefObject<HTMLDivElement | null>;
     settingsLocation: SettingsLocation;
@@ -618,6 +619,7 @@ export function Preferences({
   removeCustomColor,
   removeCustomColorOnConversations,
   renderDonationsPane,
+  renderSigDemoWallet,
   renderNotificationProfilesCreateFlow,
   renderNotificationProfilesHome,
   renderProfileEditor,
@@ -1034,12 +1036,17 @@ export function Preferences({
               value={sigDemoInferenceProvider}
               placeholder=""
               onValueChange={value => {
-                if (value === 'mesh-llm' || value === 'chatgpt') {
+                if (
+                  value === 'mesh-llm' ||
+                  value === 'mesh-llm-paid' ||
+                  value === 'chatgpt'
+                ) {
                   onSigDemoInferenceProviderChange(value);
                 }
               }}
               options={[
                 { label: 'mesh-llm', value: 'mesh-llm' },
+                { label: 'mesh-llm (paid)', value: 'mesh-llm-paid' },
                 { label: 'ChatGPT', value: 'chatgpt' },
               ]}
             />
@@ -1244,6 +1251,11 @@ export function Preferences({
         <AxoPanel.Content>{pageContents}</AxoPanel.Content>
       </AxoPanel.Root>
     );
+  } else if (
+    isSigDemo &&
+    settingsLocation.page === SettingsPage.SigDemoWallet
+  ) {
+    content = renderSigDemoWallet();
   } else if (isDonationsPage(settingsLocation.page)) {
     // oxlint-disable-next-line react/refs
     content = renderDonationsPane({
@@ -2944,6 +2956,16 @@ export function Preferences({
                   setSettingsLocation({ page: SettingsPage.General })
                 }
               />
+              {isSigDemo && (
+                <PreferencesButton
+                  symbol="creditcard"
+                  label={i18n('icu:SigDemoWallet--title')}
+                  current={settingsLocation.page === SettingsPage.SigDemoWallet}
+                  onClick={() =>
+                    setSettingsLocation({ page: SettingsPage.SigDemoWallet })
+                  }
+                />
+              )}
               <PreferencesButton
                 symbol="appearance"
                 label={i18n('icu:Preferences__button--appearance')}

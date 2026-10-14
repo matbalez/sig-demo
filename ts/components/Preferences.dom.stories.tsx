@@ -8,6 +8,7 @@ import { action } from '@storybook/addon-actions';
 import lodash from 'lodash';
 
 import { Preferences } from './Preferences.dom.tsx';
+import { PreferencesSigDemoWallet } from './PreferencesSigDemoWallet.dom.tsx';
 import { DEFAULT_CONVERSATION_COLOR } from '../types/Colors.std.ts';
 import { PhoneNumberSharingMode } from '../types/PhoneNumberSharingMode.std.ts';
 import { PhoneNumberDiscoverability } from '../util/phoneNumberDiscoverability.std.ts';
@@ -545,6 +546,21 @@ export default {
     whoCanSeeMe: PhoneNumberSharingMode.Everybody,
     zoomFactor: 1,
 
+    renderSigDemoWallet: () => (
+      <PreferencesSigDemoWallet
+        i18n={i18n}
+        snapshot={undefined}
+        invoice={undefined}
+        invoiceStatus="pending"
+        isLoading
+        isFunding={false}
+        error={undefined}
+        copied={false}
+        onRefresh={action('refreshWallet')}
+        onFund={action('fundWallet')}
+        onCopyInvoice={action('copyWalletInvoice')}
+      />
+    ),
     renderDonationsPane: ({
       contentsRef,
       settingsLocation,

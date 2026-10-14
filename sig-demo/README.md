@@ -28,7 +28,7 @@ shortened. Attachments, deleted or expired messages, and unfinished replies are
 excluded. Each invocation takes a fresh history snapshot; there is no separate
 persistent agent memory. See [Sig helper](agent/README.md).
 
-With **mesh-llm**, Sig can call a local Brave web-search tool when a question needs
+With either **mesh-llm** option, Sig can call a local Brave web-search tool when a question needs
 current information or explicitly asks for a search. The Rust helper sends a concise
 search query to Brave's LLM Context API and returns bounded excerpts and source
 URLs to the selected inference provider. It permits at most two searches per
@@ -42,17 +42,33 @@ API path. ChatGPT requests do not load the Brave tool or receive its credential.
 **General → Inference** selects the provider for the next question. The default
 is **mesh-llm**: a bundled client joins a randomly selected public mesh and picks
 an available free text-inference node at random. The selected node processes the
-question and bounded chat context. **ChatGPT** uses the existing bundled OpenAI credential.
+question and bounded chat context. The second option, **mesh-llm (paid)**, joins the
+configured unlisted mesh and uses **Qwen3.6-27B-Q6_K** from an available paid host.
+**ChatGPT** uses the existing bundled OpenAI credential.
 The setting is saved on each Mac, and provider changes leave earlier replies intact.
 If the mesh is unavailable, Sig reports that rather than silently sending the
 question to OpenAI.
+
+**Wallet** in Settings shows this installation's spendable balance and recent
+transactions. Enter a whole base-unit amount and choose **Fund wallet** to create
+a Lightning invoice, displayed as a QR code and copyable invoice. The pane polls
+while open and confirms payment by matching the invoice to a completed incoming
+transaction. Amounts are displayed as integer base units, for example **₿1,000**.
+Lexe is installed automatically on first startup; opening the wallet creates it
+without a phone, email, or separate login. Each installation keeps its own wallet.
+
+Selecting paid inference enables mesh's automatic spending policy with a **₿500
+daily budget**. Mesh handles inference payments, including planning requests and
+payment fees. Paid mode connects immediately but runs no synthetic GDK warmup.
+Returning to free mesh or ChatGPT restores free-only policy; already submitted
+payments may still settle. The budget resets on UTC calendar days.
 
 At app startup, sig demo stops other `mesh-llm` processes owned by the current
 user, then starts its bundled version on local ports 9337 and 3131. This interrupts
 other mesh work on the Mac. Its node identity, configuration, caches, and join
 token are separate from an existing mesh installation. The sidecar is client-only:
 it does not download models or share the Mac's GPU. It exits when sig demo quits.
-The connection is prepared while the app opens. Public bootstrap nodes are raced
+The saved provider is prepared while the app opens. For free mesh, public bootstrap nodes are raced
 in parallel, and eligible bootstrap hints are cached for up to 24 hours to speed
 up later launches. An unavailable cache falls back to fresh public discovery.
 Startup also runs a small, synthetic GDK inference completion on the chosen free
@@ -60,6 +76,9 @@ node to prepare its model and tool prompt before the first chat query. A slow or
 unavailable node is skipped in favor of one other randomly selected free host.
 The probe sends no chat history, uses no API credentials, and runs no web search.
 Questions share this preparation instead of starting a second cold request.
+Wallet seeds, the payment ledger, and plugin files remain in that profile's
+`mesh/` directory across provider switches and app updates. They are never part
+of the downloaded app. Keep that directory to preserve the wallet.
 See [bundled mesh sidecar](mesh/README.md).
 
 Use **Node 24.21.0**, **pnpm 11.24.0**, macOS Xcode Command Line Tools, and OpenSSL.
@@ -137,6 +156,11 @@ with `--agent-key-file` and `--brave-key-file`. The packaged helper gets the dem
 credentials from an Electron resource, and each tester runs it on their own Mac.
 Mesh requests receive no OpenAI credential. The packager includes the verified
 official mesh-llm 0.78.1 macOS bundle and its Apache-2.0 license.
+Paid inference additionally uses ignored `.sig-demo/mesh-paid.json` containing
+`inviteToken` and `model` (`Qwen3.6-27B-Q6_K`); another path can be supplied with
+`--paid-mesh-config-file`. The unlisted invitation is packaged only in a private
+resource, outside logged application configuration. A build without that file
+can still use free mesh and ChatGPT, but cannot join the paid mesh.
 
 This build supports Apple Silicon Macs. Share the resulting
 `release/sig-demo-macos-arm64.zip` and one

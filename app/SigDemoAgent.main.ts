@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { app, ipcMain } from 'electron';
-import type { WebContents } from 'electron';
+import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import { z } from 'zod';
 
 import {
@@ -17,6 +17,7 @@ import {
   SIG_DEMO_AGENT_HISTORY_MAX_BYTES,
   SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES,
   SIG_DEMO_AGENT_AUTHOR_MAX_BYTES,
+  SIG_DEMO_DEFAULT_INFERENCE_PROVIDER,
   type SigDemoAgentEventType,
   type SigDemoInferenceProviderType,
 } from '../ts/types/SigDemoAgent.std.ts';
@@ -63,10 +64,11 @@ const historySchema = z
         0
       ) <= SIG_DEMO_AGENT_HISTORY_MAX_BYTES
   );
+const providerSchema = z.enum(['mesh-llm', 'mesh-llm-paid', 'chatgpt']);
 const requestSchema = z.object({
   requestId: z.string().uuid(),
   prompt: z.string().trim().min(1).max(65_536),
-  provider: z.enum(['mesh-llm', 'chatgpt']),
+  provider: providerSchema,
   author: authorSchema.optional(),
   history: historySchema.default([]),
 });
@@ -135,9 +137,9 @@ function agentBinary(): string {
 function loadRuntime(provider: SigDemoInferenceProviderType) {
   const root = getAppRootDir();
   const binary = agentBinary();
-  const braveApiKey = provider === 'mesh-llm' ? loadBraveKey() : undefined;
+  const braveApiKey = provider !== 'chatgpt' ? loadBraveKey() : undefined;
   // Mesh uses no OpenAI credential, including when ChatGPT's file is absent.
-  if (provider === 'mesh-llm') {
+  if (provider !== 'chatgpt') {
     return {
       binary,
       model: SIG_DEMO_AGENT_MODEL,
@@ -176,10 +178,16 @@ export function setupSigDemoAgent(
   const children = new Map<string, ChildProcessWithoutNullStreams>();
   const warmChildren = new Set<ChildProcessWithoutNullStreams>();
   const starting = new Set<string>();
+  const requestProviders = new Map<string, SigDemoInferenceProviderType>();
   const mesh = new SigDemoMesh();
+  let selectedProvider = SIG_DEMO_DEFAULT_INFERENCE_PROVIDER;
+  let selectionGeneration = 0;
   const warmMeshInference = async (
     inference: SigDemoMeshInferenceType
   ): Promise<void> => {
+    if (selectedProvider !== 'mesh-llm') {
+      throw new Error('The inference provider changed.');
+    }
     const binary = agentBinary();
     if (!existsSync(binary)) {
       throw new Error('The local Sig agent is missing from this build.');
@@ -257,17 +265,101 @@ export function setupSigDemoAgent(
       );
     });
   };
-  // Prepare discovery and an actual inference completion while the messenger
-  // opens. A query shares this promise instead of starting a second cold call.
-  const startMesh = async () => {
-    try {
-      await app.whenReady();
-      await mesh.prepareInference(warmMeshInference);
-    } catch {
-      // Query-time errors explain unavailability without logging network details.
+  const prepareFreeInference = () => {
+    const generation = selectionGeneration;
+    return mesh.prepareInference(route => {
+      if (generation !== selectionGeneration) {
+        throw new Error('The inference provider changed.');
+      }
+      return warmMeshInference(route);
+    });
+  };
+  const configureProvider = async (provider: SigDemoInferenceProviderType) => {
+    if (selectedProvider !== provider) {
+      selectedProvider = provider;
+      selectionGeneration += 1;
+      // A free warmup must never survive a switch to the paid mesh. Also stop
+      // old mesh questions before changing their loopback destination/policy.
+      for (const child of warmChildren) {
+        child.kill();
+      }
+      for (const [requestId, requestProvider] of requestProviders) {
+        if (requestProvider !== 'chatgpt') {
+          starting.delete(requestId);
+          children.get(requestId)?.kill();
+        }
+      }
+    }
+    const generation = selectionGeneration;
+    await mesh.configure(provider);
+    if (generation !== selectionGeneration) {
+      throw new Error('The inference provider changed.');
+    }
+    if (provider === 'mesh-llm') {
+      // The renderer supplies its saved preference as soon as storage is ready.
+      // Paid mode connects without any speculative GDK completions.
+      const prepare = async () => {
+        try {
+          await prepareFreeInference();
+        } catch {
+          // A foreground query reports unavailable inference if needed.
+        }
+      };
+      drop(prepare());
     }
   };
-  drop(startMesh());
+  const isMainSender = (event: IpcMainInvokeEvent) =>
+    event.sender === getMainWebContents() &&
+    event.senderFrame === event.sender.mainFrame;
+  ipcMain.handle('sig-demo-agent:configure', async (event, value: unknown) => {
+    const provider = providerSchema.safeParse(value);
+    if (!isMainSender(event) || !provider.success) {
+      return { ok: false, error: 'This inference setting is unavailable.' };
+    }
+    try {
+      await configureProvider(provider.data);
+      return { ok: true };
+    } catch {
+      return {
+        ok: false,
+        error: 'The selected provider could not be prepared.',
+      };
+    }
+  });
+  ipcMain.handle('sig-demo-wallet:snapshot', async event => {
+    if (!isMainSender(event)) {
+      return { ok: false, error: 'The wallet is unavailable.' };
+    }
+    try {
+      return { ok: true, value: await mesh.getWalletSnapshot() };
+    } catch {
+      return {
+        ok: false,
+        error:
+          'The wallet could not be opened. Check your connection and refresh.',
+      };
+    }
+  });
+  ipcMain.handle('sig-demo-wallet:fund', async (event, amount: unknown) => {
+    const parsed = z
+      .number()
+      .int()
+      .positive()
+      .max(Math.floor(Number.MAX_SAFE_INTEGER / 1000))
+      .safeParse(amount);
+    if (!isMainSender(event) || !parsed.success) {
+      return { ok: false, error: 'Enter a positive whole-number amount.' };
+    }
+    try {
+      return { ok: true, value: await mesh.fundWallet(parsed.data) };
+    } catch {
+      return {
+        ok: false,
+        error:
+          'The invoice could not be confirmed. Refresh the wallet before trying again.',
+      };
+    }
+  });
   ipcMain.handle('sig-demo-agent:start', async (event, value: unknown) => {
     const parsed = requestSchema.safeParse(value);
     if (
@@ -289,34 +381,58 @@ export function setupSigDemoAgent(
     let runtime: ReturnType<typeof loadRuntime>;
     let inference: Awaited<ReturnType<SigDemoMesh['getInference']>> | undefined;
     starting.add(requestId);
+    requestProviders.set(requestId, provider);
+    const generation = selectionGeneration;
     try {
+      if (provider !== selectedProvider) {
+        throw new Error('The inference provider changed.');
+      }
+      await mesh.configure(provider);
+      if (
+        generation !== selectionGeneration ||
+        !starting.has(requestId) ||
+        provider !== selectedProvider
+      ) {
+        throw new Error('The inference provider changed.');
+      }
       runtime = loadRuntime(provider);
       if (!existsSync(runtime.binary)) {
         starting.delete(requestId);
+        requestProviders.delete(requestId);
         return {
           ok: false,
           error: 'The local Sig agent is missing from this build.',
         };
       }
       if (provider === 'mesh-llm') {
-        inference = await mesh.prepareInference(warmMeshInference);
+        inference = await prepareFreeInference();
+      } else if (provider === 'mesh-llm-paid') {
+        inference = await mesh.getInference(provider);
       }
     } catch {
       starting.delete(requestId);
+      requestProviders.delete(requestId);
+      let error = 'Sig is not configured in this build.';
+      if (provider === 'mesh-llm-paid') {
+        error =
+          'Paid mesh inference is unavailable. Check Wallet and your connection, then try again.';
+      } else if (provider === 'mesh-llm') {
+        error =
+          'No public mesh node is available. Try again, or choose ChatGPT under General → Inference.';
+      }
       return {
         ok: false,
-        error:
-          provider === 'mesh-llm'
-            ? 'No public mesh node is available. Try again, or choose ChatGPT under General → Inference.'
-            : 'Sig is not configured in this build.',
+        error,
       };
     }
     if (
       !starting.has(requestId) ||
+      generation !== selectionGeneration ||
       event.sender.isDestroyed() ||
       event.sender !== getMainWebContents()
     ) {
       starting.delete(requestId);
+      requestProviders.delete(requestId);
       return { ok: false, error: 'Sig stopped before starting this request.' };
     }
     starting.delete(requestId);
@@ -349,6 +465,7 @@ export function setupSigDemoAgent(
       completed = true;
       clearTimeout(timeout);
       children.delete(requestId);
+      requestProviders.delete(requestId);
       log.info('Inference request finished', {
         provider,
         result: message ? 'error' : 'complete',
@@ -410,7 +527,7 @@ export function setupSigDemoAgent(
     child.stdin.end(
       `${JSON.stringify({
         prompt,
-        provider,
+        provider: provider === 'chatgpt' ? 'chatgpt' : 'mesh-llm',
         author,
         history,
         currentDate: new Date().toISOString().slice(0, 10),
@@ -430,6 +547,7 @@ export function setupSigDemoAgent(
   });
   app.on('before-quit', () => {
     starting.clear();
+    requestProviders.clear();
     mesh.stop();
     for (const child of children.values()) {
       child.kill();

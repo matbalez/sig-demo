@@ -1,7 +1,10 @@
 // Copyright 2026 sig demo contributors
 // SPDX-License-Identifier: AGPL-3.0-only
 
-export type SigDemoInferenceProviderType = 'mesh-llm' | 'chatgpt';
+export type SigDemoInferenceProviderType =
+  | 'mesh-llm'
+  | 'mesh-llm-paid'
+  | 'chatgpt';
 
 export const SIG_DEMO_DEFAULT_INFERENCE_PROVIDER: SigDemoInferenceProviderType =
   'mesh-llm';
