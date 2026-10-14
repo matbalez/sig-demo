@@ -19,9 +19,9 @@
     "start": "node scripts/start-sig-demo.mjs",
     "demo:server": "node --import tsx sig-demo/server/main.ts",
     "demo:package": "node scripts/package-sig-demo.mjs",
-    "demo:agent:build": "sh sig-demo/agent/build.sh",
+    "demo:agent:build": "sh sig-demo/gdk/build-native.sh",
     "demo:mesh:fetch": "node scripts/fetch-sig-demo-mesh.mjs",
-    "demo:test": "node --test tests/sig-demo-isolation_test.node.mjs tests/sig-demo-relay_test.node.mjs tests/sig-demo-registration-draft_test.node.mjs tests/sig-demo-agent_test.node.mjs tests/sig-demo-mesh-bootstrap_test.node.mjs tests/sig-demo-agent-context_test.node.mjs tests/sig-demo-mesh-preparation_test.node.mjs tests/sig-demo-mesh-paid_test.node.mjs tests/sig-demo-paid-agent_test.node.mjs",
+    "demo:test": "node --test tests/sig-demo-isolation_test.node.mjs tests/sig-demo-relay_test.node.mjs tests/sig-demo-registration-draft_test.node.mjs tests/sig-demo-agent_test.node.mjs tests/sig-demo-mesh-bootstrap_test.node.mjs tests/sig-demo-agent-context_test.node.mjs tests/sig-demo-mesh-preparation_test.node.mjs tests/sig-demo-mesh-paid_test.node.mjs tests/sig-demo-paid-agent_test.node.mjs tests/sig-demo-gdk-runtime_test.node.mjs sig-demo/gdk/codec_test.node.mjs",
     "generate": "run-s generate:phase-0 generate:phase-1",
     "generate:phase-0": "run-s build:protobuf build:emoji-data build:rolldown:prod",
     "generate:phase-1": "run-p --aggregate-output --print-label build:icu-types build:compact-locales build:styles:prod get-expire-time build:policy-files build:db-schema",
@@ -117,7 +117,9 @@
     "check:unused-icons": "node scripts/check-unused-icons.mjs",
     "update-signal-symbols": "node scripts/update-signal-symbols.mjs",
     "changeset:version": "changeset version && pnpm install --lockfile-only",
-    "changeset:publish": "changeset publish"
+    "changeset:publish": "changeset publish",
+    "demo:gdk:test:native": "node sig-demo/gdk/native-smoke.node.mjs",
+    "demo:gdk:test:electron": "electron sig-demo/gdk/native-smoke.main.mjs"
   },
   "optionalDependencies": {
     "fs-xattr": "0.4.0"
@@ -131,7 +133,8 @@
     "@signalapp/sqlcipher": "4.1.0",
     "@signalapp/types": "workspace:*",
     "@signalapp/windows-ucv": "workspace:*",
-    "google-libphonenumber": "3.2.44"
+    "google-libphonenumber": "3.2.44",
+    "koffi": "3.3.3"
   },
   "devDependencies": {
     "@babel/core": "7.29.0",

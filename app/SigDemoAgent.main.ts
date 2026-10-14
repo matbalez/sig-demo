@@ -4,9 +4,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
 import { join } from 'node:path';
-import { spawn } from 'node:child_process';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { app, ipcMain } from 'electron';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
 import { z } from 'zod';
@@ -28,6 +25,9 @@ import {
 } from './SigDemoMesh.main.ts';
 import { drop } from '../ts/util/drop.std.ts';
 import { createLogger } from '../ts/logging/log.std.ts';
+import { loadGdk } from '../sig-demo/gdk/bindings.node.ts';
+import { createSigDemoAgentRuntime } from './SigDemoAgentRuntime.node.ts';
+import { safeSigDemoAgentError } from './SigDemoAgentErrors.std.ts';
 
 const log = createLogger('SigDemoAgent');
 
@@ -72,29 +72,6 @@ const requestSchema = z.object({
   author: authorSchema.optional(),
   history: historySchema.default([]),
 });
-const chunkSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('text'), text: z.string() }),
-  z.object({
-    type: z.literal('status'),
-    status: z.enum(['searching', 'responding']),
-  }),
-  z.object({
-    type: z.literal('timing'),
-    phase: z.enum([
-      'helper-started',
-      'model-turn',
-      'native-planning',
-      'json-planning',
-      'search',
-      'answer-first-text',
-      'answer',
-      'warmup',
-    ]),
-    durationMs: z.number().int().nonnegative(),
-  }),
-  z.object({ type: z.literal('done') }),
-  z.object({ type: z.literal('error'), message: z.string() }),
-]);
 const runtimeSchema = z.object({
   apiKey: z.string().min(20),
   model: z.string().min(1).default(SIG_DEMO_AGENT_MODEL),
@@ -110,7 +87,7 @@ function loadBraveKey(): string | undefined {
   if (app.isPackaged) {
     const runtime = JSON.parse(
       readFileSync(
-        join(process.resourcesPath, 'sig-demo-agent/runtime.json'),
+        join(process.resourcesPath, 'sig-demo-gdk/runtime.json'),
         'utf8'
       )
     );
@@ -129,31 +106,32 @@ function loadBraveKey(): string | undefined {
   );
 }
 
-function agentBinary(): string {
+function nativeLibrary(): string {
   return app.isPackaged
-    ? join(process.resourcesPath, 'sig-demo-agent/sig-demo-agent')
-    : join(getAppRootDir(), 'sig-demo/agent/target/release/sig-demo-agent');
+    ? join(process.resourcesPath, 'sig-demo-gdk/libgoose_sdk.dylib')
+    : join(
+        getAppRootDir(),
+        'sig-demo/gdk/native/target/release/libgoose_sdk.dylib'
+      );
 }
 
 function loadRuntime(provider: SigDemoInferenceProviderType) {
   const root = getAppRootDir();
-  const binary = agentBinary();
   const braveApiKey = provider !== 'chatgpt' ? loadBraveKey() : undefined;
   // Mesh uses no OpenAI credential, including when ChatGPT's file is absent.
   if (provider !== 'chatgpt') {
     return {
-      binary,
       model: SIG_DEMO_AGENT_MODEL,
       apiKey: undefined,
       braveApiKey,
     };
   }
   if (app.isPackaged) {
-    const directory = join(process.resourcesPath, 'sig-demo-agent');
+    const directory = join(process.resourcesPath, 'sig-demo-gdk');
     const runtime = runtimeSchema.parse(
       JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'))
     );
-    return { ...runtime, binary, braveApiKey };
+    return { ...runtime, braveApiKey };
   }
   // Keep the key outside NODE_CONFIG, whose values upstream logs at startup.
   const contents = readFileSync(join(root, '.sig-demo/agent.env'), 'utf8');
@@ -167,104 +145,66 @@ function loadRuntime(provider: SigDemoInferenceProviderType) {
   });
   return {
     ...runtime,
-    binary,
     braveApiKey,
   };
 }
 
-/** The credential stays in the main process and its local GDK child only. */
+type AgentTask = {
+  controller: AbortController;
+  done: Promise<void>;
+};
+
+/** The native GDK and credentials stay in Electron's main process. */
 export function setupSigDemoAgent(
   getMainWebContents: () => WebContents | undefined
 ): void {
-  const children = new Map<string, ChildProcessWithoutNullStreams>();
-  const warmChildren = new Set<ChildProcessWithoutNullStreams>();
+  const tasks = new Map<string, AgentTask>();
+  const warmTasks = new Set<AgentTask>();
+  let nativeRuntime: ReturnType<typeof createSigDemoAgentRuntime> | undefined;
+  const getRuntime = () => {
+    if (!nativeRuntime) {
+      nativeRuntime = createSigDemoAgentRuntime(loadGdk(nativeLibrary()));
+    }
+    return nativeRuntime;
+  };
   const starting = new Set<string>();
   const requestProviders = new Map<string, SigDemoInferenceProviderType>();
   const mesh = new SigDemoMesh();
   let selectedProvider = SIG_DEMO_DEFAULT_INFERENCE_PROVIDER;
   let selectionGeneration = 0;
+  let nativeDrain: Promise<void> = Promise.resolve();
   const warmMeshInference = async (
     inference: SigDemoMeshInferenceType
   ): Promise<void> => {
     if (selectedProvider !== 'mesh-llm') {
       throw new Error('The inference provider changed.');
     }
-    const binary = agentBinary();
-    if (!existsSync(binary)) {
-      throw new Error('The local Sig agent is missing from this build.');
-    }
-    await new Promise<void>((resolve, reject) => {
-      // Warm only the free selected mesh route, with synthetic input and no
-      // credentials or conversation data. OpenAI is never warmed at startup.
-      const env: NodeJS.ProcessEnv = {};
-      for (const name of [
-        'PATH',
-        'HOME',
-        'USER',
-        'LOGNAME',
-        'TMPDIR',
-        'LANG',
-      ]) {
-        env[name] = process.env[name];
-      }
-      const startedAt = performance.now();
-      const child = spawn(binary, [], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-      warmChildren.add(child);
-      let finished = false;
-      const finish = (ok: boolean) => {
-        if (finished) {
-          return;
-        }
-        finished = true;
-        clearTimeout(timeout);
-        warmChildren.delete(child);
-        child.kill();
-        log.info('Mesh inference warmup finished', {
-          result: ok ? 'ready' : 'unavailable',
-          totalMs: Math.round(performance.now() - startedAt),
+    const startedAt = performance.now();
+    const controller = new AbortController();
+    const task: AgentTask = { controller, done: Promise.resolve() };
+    // Free-only preparation contains synthetic input and no credentials.
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    warmTasks.add(task);
+    task.done = (async () =>
+      getRuntime().warmSigDemoMesh(inference, controller.signal, event => {
+        log.info('Mesh warmup phase', {
+          phase: event.phase,
+          durationMs: event.durationMs,
+          eventAtMs: Math.round(performance.now() - startedAt),
         });
-        if (ok) {
-          resolve();
-        } else {
-          reject(
-            new Error('The mesh inference route did not become responsive.')
-          );
-        }
-      };
-      const timeout = setTimeout(() => finish(false), 20_000);
-      const lines = createInterface({ input: child.stdout });
-      lines.on('line', line => {
-        if (finished) {
-          return;
-        }
-        try {
-          const chunk = chunkSchema.parse(JSON.parse(line));
-          if (chunk.type === 'timing') {
-            log.info('Mesh warmup phase', {
-              phase: chunk.phase,
-              durationMs: chunk.durationMs,
-              helperEventAtMs: Math.round(performance.now() - startedAt),
-            });
-          } else if (chunk.type === 'done') {
-            finish(true);
-          } else if (chunk.type === 'error') {
-            finish(false);
-          }
-        } catch {
-          finish(false);
-        }
+      }))();
+    let ready = false;
+    try {
+      await task.done;
+      ready = true;
+    } finally {
+      clearTimeout(timeout);
+      warmTasks.delete(task);
+      log.info('Mesh inference warmup finished', {
+        result: ready ? 'ready' : 'unavailable',
+        totalMs: Math.round(performance.now() - startedAt),
       });
-      child.stderr.resume();
-      child.stdin.on('error', () => finish(false));
-      child.once('error', () => finish(false));
-      child.once('close', () => {
-        lines.close();
-        finish(false);
-      });
-      child.stdin.end(
-        `${JSON.stringify({ mode: 'warmup', provider: 'mesh-llm', ...inference })}\n`
-      );
-    });
+    }
   };
   const prepareFreeInference = () => {
     const generation = selectionGeneration;
@@ -276,22 +216,44 @@ export function setupSigDemoAgent(
     });
   };
   const configureProvider = async (provider: SigDemoInferenceProviderType) => {
+    const cancelled: Array<AgentTask> = [];
     if (selectedProvider !== provider) {
       selectedProvider = provider;
       selectionGeneration += 1;
       // A free warmup must never survive a switch to the paid mesh. Also stop
       // old mesh questions before changing their loopback destination/policy.
-      for (const child of warmChildren) {
-        child.kill();
+      cancelled.push(...warmTasks);
+      for (const task of cancelled) {
+        task.controller.abort();
       }
       for (const [requestId, requestProvider] of requestProviders) {
         if (requestProvider !== 'chatgpt') {
           starting.delete(requestId);
-          children.get(requestId)?.kill();
+          const task = tasks.get(requestId);
+          if (task) {
+            task.controller.abort();
+            cancelled.push(task);
+          }
         }
       }
     }
     const generation = selectionGeneration;
+    if (cancelled.length > 0) {
+      const previousDrain = nativeDrain;
+      nativeDrain = (async () => {
+        await Promise.allSettled([
+          previousDrain,
+          ...cancelled.map(task => task.done),
+        ]);
+      })();
+    }
+    // Every caller, including duplicate configure IPC and new questions, shares
+    // this barrier until the previous selection's native streams are disposed.
+    // Drop streams and pending native futures before changing loopback routes.
+    await nativeDrain;
+    if (generation !== selectionGeneration) {
+      throw new Error('The inference provider changed.');
+    }
     await mesh.configure(provider);
     if (generation !== selectionGeneration) {
       throw new Error('The inference provider changed.');
@@ -367,7 +329,7 @@ export function setupSigDemoAgent(
       !parsed.success ||
       event.sender !== getMainWebContents() ||
       event.senderFrame !== event.sender.mainFrame ||
-      children.has(parsed.data.requestId) ||
+      tasks.has(parsed.data.requestId) ||
       starting.has(parsed.data.requestId)
     ) {
       return { ok: false, error: 'Sig could not start this request.' };
@@ -388,6 +350,10 @@ export function setupSigDemoAgent(
       if (provider !== selectedProvider) {
         throw new Error('The inference provider changed.');
       }
+      await nativeDrain;
+      if (generation !== selectionGeneration || !starting.has(requestId)) {
+        throw new Error('The inference provider changed.');
+      }
       await mesh.configure(provider);
       if (
         generation !== selectionGeneration ||
@@ -397,12 +363,12 @@ export function setupSigDemoAgent(
         throw new Error('The inference provider changed.');
       }
       runtime = loadRuntime(provider);
-      if (!existsSync(runtime.binary)) {
+      if (!existsSync(nativeLibrary())) {
         starting.delete(requestId);
         requestProviders.delete(requestId);
         return {
           ok: false,
-          error: 'The local Sig agent is missing from this build.',
+          error: 'The native Sig agent is missing from this build.',
         };
       }
       if (provider === 'mesh-llm') {
@@ -443,20 +409,9 @@ export function setupSigDemoAgent(
       routeWaitMs: Math.round(preparedAt - requestedAt),
     });
     send({ requestId, type: 'status', status: 'responding' });
-    const env = { ...process.env };
-    delete env.OPENAI_API_KEY;
-    delete env.BRAVE_SEARCH_API_KEY;
-    if (provider === 'chatgpt') {
-      env.OPENAI_API_KEY = runtime.apiKey;
-    }
-    if (runtime.braveApiKey) {
-      env.BRAVE_SEARCH_API_KEY = runtime.braveApiKey;
-    }
-    const child = spawn(runtime.binary, [], {
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    children.set(requestId, child);
+    const controller = new AbortController();
+    const task: AgentTask = { controller, done: Promise.resolve() };
+    tasks.set(requestId, task);
     let completed = false;
     let receivedText = false;
     let modelTurns = 0;
@@ -466,8 +421,6 @@ export function setupSigDemoAgent(
       }
       completed = true;
       clearTimeout(timeout);
-      children.delete(requestId);
-      requestProviders.delete(requestId);
       log.info('Inference request finished', {
         provider,
         modelTurns,
@@ -481,86 +434,97 @@ export function setupSigDemoAgent(
       );
     };
     const timeout = setTimeout(() => {
+      controller.abort();
       finish('Sig took too long. Please try again.');
-      child.kill();
     }, 180_000);
-    const lines = createInterface({ input: child.stdout });
-    lines.on('line', line => {
-      if (completed) {
-        return;
-      }
+    const execute = async () => {
       try {
-        const chunk = chunkSchema.parse(JSON.parse(line));
-        if (chunk.type === 'text') {
-          if (!receivedText && chunk.text) {
-            receivedText = true;
-            log.info('Inference first text received', {
-              provider,
-              helperToFirstTextMs: Math.round(performance.now() - preparedAt),
-            });
+        await getRuntime().runSigDemoAgent(
+          {
+            prompt,
+            provider: provider === 'chatgpt' ? 'chatgpt' : 'mesh-llm',
+            author,
+            history,
+            currentDate: new Date().toISOString().slice(0, 10),
+            ...(inference ?? { model: runtime.model }),
+          },
+          { apiKey: runtime.apiKey, braveApiKey: runtime.braveApiKey },
+          controller.signal,
+          chunk => {
+            if (completed) {
+              return;
+            }
+            if (chunk.type === 'text') {
+              if (!receivedText && chunk.text) {
+                receivedText = true;
+                log.info('Inference first text received', {
+                  provider,
+                  runtimeToFirstTextMs: Math.round(
+                    performance.now() - preparedAt
+                  ),
+                });
+              }
+              send({ requestId, type: 'text', text: chunk.text });
+            } else if (chunk.type === 'status') {
+              send({ requestId, type: 'status', status: chunk.status });
+            } else if (chunk.type === 'timing') {
+              if (chunk.phase === 'model-turn') {
+                modelTurns += 1;
+              }
+              log.info('Inference phase', {
+                provider,
+                phase: chunk.phase,
+                durationMs: chunk.durationMs,
+                eventAtMs: Math.round(performance.now() - preparedAt),
+                ...(chunk.phase === 'model-turn'
+                  ? { modelTurn: modelTurns }
+                  : {}),
+              });
+            }
           }
-          send({ requestId, type: 'text', text: chunk.text });
-        } else if (chunk.type === 'status') {
-          send({ requestId, type: 'status', status: chunk.status });
-        } else if (chunk.type === 'timing') {
-          if (chunk.phase === 'model-turn') {
-            modelTurns += 1;
-          }
-          log.info('Inference phase', {
-            provider,
-            phase: chunk.phase,
-            durationMs: chunk.durationMs,
-            helperEventAtMs: Math.round(performance.now() - preparedAt),
-            ...(chunk.phase === 'model-turn' ? { modelTurn: modelTurns } : {}),
-          });
-        } else if (chunk.type === 'error') {
-          finish(chunk.message);
-        } else {
-          finish();
-        }
-      } catch {
-        finish('Sig returned an unreadable response.');
-        child.kill();
+        );
+        finish(
+          controller.signal.aborted
+            ? 'Sig stopped before completing its response.'
+            : undefined
+        );
+      } catch (error) {
+        // Native/provider diagnostics may contain prompts or credentials.
+        finish(
+          controller.signal.aborted
+            ? 'Sig stopped before completing its response.'
+            : safeSigDemoAgentError(error)
+        );
+      } finally {
+        // UI completion can precede teardown on a timeout. Keep the native job
+        // tracked until all futures and streams are released.
+        tasks.delete(requestId);
+        requestProviders.delete(requestId);
       }
-    });
-    // Discard provider diagnostics: they can contain prompt or credential data.
-    child.stderr.resume();
-    child.stdin.on('error', () => finish('Sig could not read this request.'));
-    child.once('error', () => finish('The local Sig agent could not start.'));
-    child.once('close', () => {
-      lines.close();
-      finish('Sig stopped before completing its response.');
-    });
-    child.stdin.end(
-      `${JSON.stringify({
-        prompt,
-        provider: provider === 'chatgpt' ? 'chatgpt' : 'mesh-llm',
-        author,
-        history,
-        currentDate: new Date().toISOString().slice(0, 10),
-        ...(inference ?? { model: runtime.model }),
-      })}\n`
-    );
+    };
+    task.done = execute();
+    drop(task.done);
     return { ok: true };
   });
   ipcMain.on('sig-demo-agent:cancel', (event, requestId: unknown) => {
     if (
       event.sender === getMainWebContents() &&
+      event.senderFrame === event.sender.mainFrame &&
       typeof requestId === 'string'
     ) {
       starting.delete(requestId);
-      children.get(requestId)?.kill();
+      tasks.get(requestId)?.controller.abort();
     }
   });
   app.on('before-quit', () => {
     starting.clear();
     requestProviders.clear();
+    for (const task of tasks.values()) {
+      task.controller.abort();
+    }
+    for (const task of warmTasks) {
+      task.controller.abort();
+    }
     mesh.stop();
-    for (const child of children.values()) {
-      child.kill();
-    }
-    for (const child of warmChildren) {
-      child.kill();
-    }
   });
 }

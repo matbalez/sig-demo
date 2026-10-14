@@ -2,6 +2,7 @@
   "include": [
     "ts/**/*",
     "app/**/*",
+    "sig-demo/gdk/*.ts",
     "package.json",
     "build/intl-linter/**/*.ts",
     ".oxlint/**/*",

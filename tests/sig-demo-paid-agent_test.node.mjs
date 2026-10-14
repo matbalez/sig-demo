@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import assert from 'node:assert/strict';
-import { EventEmitter } from 'node:events';
 import { registerHooks } from 'node:module';
 import process from 'node:process';
-import { PassThrough, Writable } from 'node:stream';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers';
 
@@ -42,9 +40,13 @@ const stubs = new Map([
     `export const existsSync = path => globalThis.${harnessKey}.exists(path);
      export const readFileSync = path => globalThis.${harnessKey}.read(path);`,
   ],
+  ['bindings.node.ts', 'export const loadGdk = () => ({})'],
   [
-    'node:child_process',
-    `export const spawn = (...args) => globalThis.${harnessKey}.spawn(...args);`,
+    'SigDemoAgentRuntime.node.ts',
+    `export const createSigDemoAgentRuntime = () => ({
+      runSigDemoAgent: (...args) => globalThis.${harnessKey}.run(...args),
+      warmSigDemoMesh: (...args) => globalThis.${harnessKey}.warm(...args),
+    });`,
   ],
   [
     'appRootDir.main.ts',
@@ -96,7 +98,7 @@ function createHarness() {
   const appListeners = new Map();
   const records = [];
   const reads = [];
-  const spawns = [];
+  const calls = [];
   const fundCalls = [];
   const events = [];
   const mainFrame = {};
@@ -117,7 +119,7 @@ function createHarness() {
     listeners,
     records,
     reads,
-    spawns,
+    calls,
     fundCalls,
     events,
     sender,
@@ -129,7 +131,7 @@ function createHarness() {
       provider === 'mesh-llm-paid' ? paidRoute : freeRoute,
     prepareImpl: async () => freeRoute,
     fundImpl: async () => invoice,
-    helperReply: true,
+    runtimeReply: true,
     record: (...value) => records.push(value),
     appOn: (name, callback) => appListeners.set(name, callback),
     handle: (name, callback) => handlers.set(name, callback),
@@ -165,45 +167,42 @@ function createHarness() {
       fundCalls.push(amount);
       return harness.fundImpl(amount);
     },
-    spawn(binary, args, options) {
-      const child = new EventEmitter();
-      child.stdout = new PassThrough();
-      child.stderr = new PassThrough();
-      child.input = '';
-      child.killed = false;
-      child.kill = () => {
-        if (child.killed) {
-          return true;
+    run(request, credentials, signal, onEvent) {
+      return harness.nativeCall(request, credentials, signal, onEvent);
+    },
+    warm(route, signal) {
+      return harness.nativeCall({ mode: 'warmup', ...route }, {}, signal);
+    },
+    nativeCall(request, credentials, signal, onEvent) {
+      const call = { request, credentials, signal, aborted: false };
+      calls.push(call);
+      records.push(['run', calls.length - 1]);
+      return new Promise((resolve, reject) => {
+        const abort = () => {
+          call.aborted = true;
+          records.push(['abort', calls.indexOf(call)]);
+          const finish = () =>
+            reject(new Error('Synthetic native cancellation'));
+          if (harness.abortGate) {
+            const waitForDrain = async () => {
+              await harness.abortGate.promise;
+              finish();
+            };
+            void waitForDrain();
+          } else finish();
+        };
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) {
+          abort();
+        } else if (harness.runtimeReply && request.mode !== 'warmup') {
+          globalThis.queueMicrotask(() => {
+            signal.removeEventListener('abort', abort);
+            onEvent({ type: 'text', text: '5' });
+            onEvent({ type: 'done' });
+            resolve();
+          });
         }
-        child.killed = true;
-        records.push(['kill', spawns.indexOf(child)]);
-        globalThis.queueMicrotask(() => child.emit('close', null, 'SIGTERM'));
-        return true;
-      };
-      child.stdin = new Writable({
-        write(chunk, encoding, callback) {
-          child.input += chunk.toString();
-          callback();
-        },
-        final(callback) {
-          child.request = JSON.parse(child.input);
-          if (harness.helperReply && child.request.mode !== 'warmup') {
-            globalThis.queueMicrotask(() => {
-              child.stdout.write(
-                `${JSON.stringify({ type: 'text', text: '5' })}\n`
-              );
-              child.stdout.write(`${JSON.stringify({ type: 'done' })}\n`);
-              child.stdout.end();
-              child.emit('close', 0, null);
-            });
-          }
-          callback();
-        },
       });
-      Object.assign(child, { binary, args, options });
-      spawns.push(child);
-      records.push(['spawn', spawns.length - 1]);
-      return child;
     },
     invoke: (name, value, source = event) => handlers.get(name)(source, value),
     cleanup() {
@@ -223,8 +222,8 @@ const question = provider => ({
   history: [{ role: 'user', author: 'Bob', text: 'We are doing arithmetic.' }],
 });
 
-// The runner has its own process. Synthetic ambient credentials verify that
-// inherited keys are removed or replaced without using any real credential.
+// Synthetic ambient credentials verify that only explicit provider credentials
+// enter the native runtime without using any real credential.
 const ambientCredentials = new Map(
   ['OPENAI_API_KEY', 'BRAVE_SEARCH_API_KEY'].map(name => [
     name,
@@ -235,7 +234,7 @@ process.env.OPENAI_API_KEY = 'ambient-openai-test-key';
 process.env.BRAVE_SEARCH_API_KEY = 'ambient-brave-test-key';
 
 try {
-  await test('paid provider configuration connects without invoking a GDK warmup', async () => {
+  await test('paid provider configuration connects without invoking a native GDK warmup', async () => {
     const harness = createHarness();
     try {
       assert.deepEqual(
@@ -244,7 +243,7 @@ try {
       );
       await tick();
       assert.deepEqual(harness.records, [['configure', 'mesh-llm-paid']]);
-      assert.equal(harness.spawns.length, 0);
+      assert.equal(harness.calls.length, 0);
       assert.equal(harness.reads.length, 0);
     } finally {
       harness.cleanup();
@@ -260,8 +259,8 @@ try {
         { ok: true }
       );
       await tick();
-      assert.equal(harness.spawns.length, 1);
-      const child = harness.spawns[0];
+      assert.equal(harness.calls.length, 1);
+      const child = harness.calls[0];
       assert.equal(child.request.provider, 'mesh-llm');
       assert.equal(child.request.mode, undefined);
       assert.equal(child.request.model, paidRoute.model);
@@ -272,8 +271,8 @@ try {
         child.request.history,
         question('mesh-llm-paid').history
       );
-      assert.equal(child.options.env.OPENAI_API_KEY, undefined);
-      assert.equal(child.options.env.BRAVE_SEARCH_API_KEY, fakeBraveKey);
+      assert.equal(child.credentials.apiKey, undefined);
+      assert.equal(child.credentials.braveApiKey, fakeBraveKey);
       assert.deepEqual(harness.reads, [
         '/__sig_demo_paid_agent_test__/.sig-demo/brave.env',
       ]);
@@ -302,11 +301,11 @@ try {
         { ok: true }
       );
       await tick();
-      const child = harness.spawns[0];
+      const child = harness.calls[0];
       assert.equal(child.request.provider, 'chatgpt');
       assert.equal(child.request.targetNodeId, undefined);
-      assert.equal(child.options.env.OPENAI_API_KEY, fakeOpenAIKey);
-      assert.equal(child.options.env.BRAVE_SEARCH_API_KEY, undefined);
+      assert.equal(child.credentials.apiKey, fakeOpenAIKey);
+      assert.equal(child.credentials.braveApiKey, undefined);
       assert.deepEqual(harness.reads, [
         '/__sig_demo_paid_agent_test__/.sig-demo/agent.env',
       ]);
@@ -406,30 +405,70 @@ try {
       };
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm');
       await tick();
-      assert.equal(harness.spawns.length, 1);
-      const warmChild = harness.spawns[0];
+      assert.equal(harness.calls.length, 1);
+      const warmChild = harness.calls[0];
       assert.equal(warmChild.request.mode, 'warmup');
-      assert.equal(warmChild.options.env.OPENAI_API_KEY, undefined);
-      assert.equal(warmChild.options.env.BRAVE_SEARCH_API_KEY, undefined);
+      assert.equal(warmChild.credentials.apiKey, undefined);
+      assert.equal(warmChild.credentials.braveApiKey, undefined);
       assert.deepEqual(
         await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid'),
         { ok: true }
       );
       await tick();
-      assert.equal(warmChild.killed, true);
-      const killedAt = harness.records.findIndex(([name]) => name === 'kill');
+      assert.equal(warmChild.aborted, true);
+      const killedAt = harness.records.findIndex(([name]) => name === 'abort');
       const paidConfigureAt = harness.records.findIndex(
         ([name, provider]) =>
           name === 'configure' && provider === 'mesh-llm-paid'
       );
       assert.ok(killedAt >= 0 && killedAt < paidConfigureAt);
-      assert.equal(harness.spawns.length, 1);
+      assert.equal(harness.calls.length, 1);
     } finally {
       harness.cleanup();
     }
   });
 
-  await test('a delayed free warmup callback cannot spawn after switching to paid', async () => {
+  await test('duplicate configure and a new question wait for cancelled native streams to be disposed', async () => {
+    const harness = createHarness();
+    try {
+      harness.runtimeReply = false;
+      const old = await harness.invoke(
+        'sig-demo-agent:start',
+        question('mesh-llm')
+      );
+      assert.equal(old.ok, true);
+      harness.abortGate = Promise.withResolvers();
+      const first = harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
+      await tick();
+      const second = harness.invoke(
+        'sig-demo-agent:configure',
+        'mesh-llm-paid'
+      );
+      const next = harness.invoke('sig-demo-agent:start', {
+        ...question('mesh-llm-paid'),
+        requestId: '00000000-0000-4000-8000-000000000002',
+      });
+      await tick();
+      assert.equal(harness.calls.length, 1);
+      assert.equal(
+        harness.records.some(
+          ([name, provider]) =>
+            name === 'configure' && provider === 'mesh-llm-paid'
+        ),
+        false
+      );
+      harness.abortGate.resolve();
+      assert.equal((await first).ok, true);
+      assert.equal((await second).ok, true);
+      assert.equal((await next).ok, true);
+      assert.equal(harness.calls.length, 2);
+      assert.equal(harness.calls[0].aborted, true);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('a delayed free warmup callback cannot start after switching to paid', async () => {
     const harness = createHarness();
     try {
       const gate = Promise.withResolvers();
@@ -440,11 +479,11 @@ try {
       };
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm');
       await tick();
-      assert.equal(harness.spawns.length, 0);
+      assert.equal(harness.calls.length, 0);
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
       gate.resolve();
       await tick();
-      assert.equal(harness.spawns.length, 0);
+      assert.equal(harness.calls.length, 0);
     } finally {
       harness.cleanup();
     }
@@ -470,13 +509,13 @@ try {
       gate.resolve();
       await tick();
       assert.equal(preparations, 2);
-      assert.equal(harness.spawns.length, 0);
+      assert.equal(harness.calls.length, 0);
     } finally {
       harness.cleanup();
     }
   });
 
-  await test('a free request awaiting configuration cannot spawn after switching to paid', async () => {
+  await test('a free request awaiting configuration cannot start after switching to paid', async () => {
     const harness = createHarness();
     try {
       const gate = Promise.withResolvers();
@@ -490,7 +529,7 @@ try {
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
       gate.resolve();
       assert.equal((await stale).ok, false);
-      assert.equal(harness.spawns.length, 0);
+      assert.equal(harness.calls.length, 0);
       assert.equal(harness.reads.length, 0);
       assert.ok(
         !harness.records.some(([name]) => name === 'prepare-inference')
@@ -500,7 +539,7 @@ try {
     }
   });
 
-  await test('a paid route that arrives after a provider switch cannot launch a request', async () => {
+  await test('a paid route that arrives after a provider switch cannot start a request', async () => {
     const harness = createHarness();
     try {
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
@@ -514,17 +553,17 @@ try {
       await harness.invoke('sig-demo-agent:configure', 'chatgpt');
       gate.resolve(paidRoute);
       assert.equal((await stale).ok, false);
-      assert.equal(harness.spawns.length, 0);
+      assert.equal(harness.calls.length, 0);
       assert.equal(harness.events.length, 0);
     } finally {
       harness.cleanup();
     }
   });
 
-  await test('an active paid helper stops before switching back to free inference', async () => {
+  await test('an active paid native request stops before switching back to free inference', async () => {
     const harness = createHarness();
     try {
-      harness.helperReply = false;
+      harness.runtimeReply = false;
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
       assert.equal(
         (
@@ -535,16 +574,16 @@ try {
         ).ok,
         true
       );
-      const child = harness.spawns[0];
+      const child = harness.calls[0];
       await harness.invoke('sig-demo-agent:configure', 'mesh-llm');
       await tick();
-      assert.equal(child.killed, true);
-      const killedAt = harness.records.findIndex(([name]) => name === 'kill');
+      assert.equal(child.aborted, true);
+      const killedAt = harness.records.findIndex(([name]) => name === 'abort');
       const freeConfigureAt = harness.records.findIndex(
         ([name, provider]) => name === 'configure' && provider === 'mesh-llm'
       );
       assert.ok(killedAt >= 0 && killedAt < freeConfigureAt);
-      assert.equal(harness.spawns.length, 1);
+      assert.equal(harness.calls.length, 1);
     } finally {
       harness.cleanup();
     }

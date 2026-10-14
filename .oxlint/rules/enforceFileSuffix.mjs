@@ -94,6 +94,7 @@ const NODE_PACKAGES = new Set([
   'growing-file',
   'http-proxy-agent',
   'https-proxy-agent',
+  'koffi',
   'node-fetch',
   'read-last-lines',
   'socks-proxy-agent',

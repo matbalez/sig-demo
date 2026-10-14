@@ -18,7 +18,7 @@ This is a closed test/demo for a handful of friends. One-to-one messaging and
 Groups V2 are the intended scope; calling, backups, mobile clients, and full
 Signal feature parity are outside this demo.
 
-Type `@sig` and a question in any chat to run that sender's local Sig helper.
+Type `@sig` and a question in any chat to run that sender's local Sig agent.
 Everyone in the chat sees one Sig reply for that query, updated as text streams;
 the next question gets a separate reply. Responses travel through the existing
 encrypted direct or group messaging path. Sig receives the current question and
@@ -26,10 +26,10 @@ up to 12 recent completed text messages from that chat, including earlier Sig
 answers. History has a 6,000-byte budget (roughly 2,000 tokens), with long messages
 shortened. Attachments, deleted or expired messages, and unfinished replies are
 excluded. Each invocation takes a fresh history snapshot; there is no separate
-persistent agent memory. See [Sig helper](agent/README.md).
+persistent agent memory. See [native GDK integration](gdk/README.md).
 
 With either **mesh-llm** option, Sig can call a local Brave web-search tool when a question needs
-current information or explicitly asks for a search. The Rust helper sends a concise
+current information or explicitly asks for a search. The local TypeScript agent sends a concise
 search query to Brave's LLM Context API and returns bounded excerpts and source
 URLs to the selected inference provider. It permits at most two searches per
 question and asks Sig to cite the source URLs. The approved Brave demo key is
@@ -148,16 +148,18 @@ setup can resume with the same invitation and keys.
 After generating current assets, package a local macOS app:
 
 ```sh
-sh sig-demo/agent/build.sh
+sh sig-demo/gdk/build-native.sh
 node scripts/fetch-sig-demo-mesh.mjs
 pnpm run demo:package --config .sig-demo/client.json --arch arm64
 ```
 
-The local helper needs the approved demo credentials in ignored
+The local agent needs the approved demo credentials in ignored
 `.sig-demo/agent.env` (`OPENAI_API_KEY`) and `.sig-demo/brave.env`
 (`BRAVE_SEARCH_API_KEY`). The packager accepts other private credential files
-with `--agent-key-file` and `--brave-key-file`. The packaged helper gets the demo
-credentials from an Electron resource, and each tester runs it on their own Mac.
+with `--agent-key-file` and `--brave-key-file`. Electron loads the demo credentials from a private resource and runs the GDK
+SDK directly in its main process through TypeScript UniFFI bindings. Each tester
+runs their own local agent; no Rust helper executable or JSON subprocess bridge
+is packaged.
 Mesh requests receive no OpenAI credential. The packager includes the verified
 official mesh-llm 0.78.1 macOS bundle and its Apache-2.0 license.
 Paid inference additionally uses ignored `.sig-demo/mesh-paid.json` containing
@@ -168,13 +170,13 @@ can still use free mesh and ChatGPT, but cannot join the paid mesh.
 
 This build supports Apple Silicon Macs. Share the resulting
 `release/sig-demo-macos-arm64.zip` and one
-invitation with each tester. The helper builds and verifies the ad-hoc signed
+invitation with each tester. The packager builds and verifies the ad-hoc signed
 app in a temporary directory outside cloud-synced folders, then creates the ZIP.
 It also leaves a review copy at `release/mac-arm64/sig demo.app`;
 use the ZIP or the printed signed staging path for
 installation. Server settings in the bundle are public; invitations and server
 private keys stay separate. The bundle also carries the approved demo agent
-credentials, so distribute it through the private download repository. The helper
+credentials, so distribute it through the private download repository. The packager
 does not publish or notarize the app.
 
 Implementation details are in [client account creation](CLIENT-PLAN.md) and

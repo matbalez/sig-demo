@@ -104,6 +104,7 @@ allowBuilds:
   '@tailwindcss/oxide@4.3.0': true
   'electron@44.4.5': true
   'fs-xattr@0.4.0': true
+  'koffi@3.3.3': true
 
   # Disabled Builds: Use wildcard version
   #   ex: 'package': false
@@ -114,8 +115,6 @@ allowBuilds:
   'esbuild': false
   'utf-8-validate': false
   'electron@23.3.13': false # duplicate package
-  '@signalapp/mute-state-change@file:packages/mute-state-change': set this to true or false
-  '@signalapp/windows-ucv@file:packages/windows-ucv': set this to true or false
 
 dedupePeers: true
 dedupePeerDependents: true

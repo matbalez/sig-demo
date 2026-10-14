@@ -2,24 +2,22 @@
 # SPDX-License-Identifier: AGPL-3.0-only
 
 [package]
-name = "sig-agent"
+name = "sig-demo-gdk-native-build"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.94.1"
 license = "AGPL-3.0-only"
 publish = false
 
+# Build the SDK package itself, whose upstream crate already produces a cdylib.
+# This package exists only to pin dependencies and retain our provider patch.
 [dependencies]
 goose-sdk = { version = "=0.1.0-alpha.12", features = ["uniffi"] }
-reqwest = { version = "=0.13.5", default-features = false, features = ["json", "rustls"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 
 [patch.crates-io]
 goose-provider-types = { path = "vendor/goose-provider-types" }
 
 [profile.release]
-strip = true
+strip = "debuginfo"
 lto = "thin"
 codegen-units = 1

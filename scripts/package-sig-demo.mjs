@@ -21,7 +21,7 @@ const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE] [--paid-mesh-config-file FILE]\nBuilds sig demo with its Rust chat helper, mesh-llm sidecar, and approved private demo configuration; no publishing or notarization.'
+    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE] [--paid-mesh-config-file FILE]\nBuilds sig demo with its native GDK SDK, mesh-llm sidecar, and approved private demo configuration; no publishing or notarization.'
   );
   process.exit(0);
 }
@@ -103,12 +103,14 @@ if (
   );
 }
 const builderPath = resolve(root, 'node_modules/electron-builder/cli.js');
-const agentBinaryPath = resolve(
+const gdkLibraryPath = resolve(
   root,
-  'sig-demo/agent/target/release/sig-demo-agent'
+  'sig-demo/gdk/native/target/release/libgoose_sdk.dylib'
 );
-if (!existsSync(agentBinaryPath)) {
-  throw new Error('Build the Sig helper first: sh sig-demo/agent/build.sh');
+if (!existsSync(gdkLibraryPath)) {
+  throw new Error(
+    'Build the native GDK first: sh sig-demo/gdk/build-native.sh'
+  );
 }
 if (
   !existsSync(agentKeyPath) ||
@@ -155,36 +157,32 @@ if (
 ) {
   throw new Error('The approved Sig Brave credential file is unusable.');
 }
-const agentArchitecture = spawnSync(
-  '/usr/bin/lipo',
-  ['-archs', agentBinaryPath],
-  {
-    encoding: 'utf8',
-  }
-);
+const gdkArchitecture = spawnSync('/usr/bin/lipo', ['-archs', gdkLibraryPath], {
+  encoding: 'utf8',
+});
 if (
-  agentArchitecture.error ||
-  agentArchitecture.status !== 0 ||
-  !agentArchitecture.stdout.trim().split(/\s+/).includes(arch)
+  gdkArchitecture.error ||
+  gdkArchitecture.status !== 0 ||
+  !gdkArchitecture.stdout.trim().split(/\s+/).includes(arch)
 ) {
   throw new Error(
-    'The Sig helper architecture does not match this Mac package.'
+    'The native GDK architecture does not match this Mac package.'
   );
 }
 // Build outside cloud-synced Documents folders, whose File Provider can recreate
 // Finder metadata immediately after xattr cleanup and invalidate verification.
 const buildRoot = mkdtempSync(join(tmpdir(), 'sig-demo-build-'));
-const agentResources = resolve(buildRoot, 'sig-demo-agent');
-mkdirSync(agentResources, { mode: 0o700 });
-copyFileSync(agentBinaryPath, resolve(agentResources, 'sig-demo-agent'));
+const gdkResources = resolve(buildRoot, 'sig-demo-gdk');
+mkdirSync(gdkResources, { mode: 0o700 });
+copyFileSync(gdkLibraryPath, resolve(gdkResources, 'libgoose_sdk.dylib'));
 for (const name of ['LICENSE', 'NOTICE', 'SIG_DEMO_PATCH.md']) {
   copyFileSync(
-    resolve(root, 'sig-demo/agent/vendor/goose-provider-types', name),
-    resolve(agentResources, `GDK-${name}`)
+    resolve(root, 'sig-demo/gdk/native/vendor/goose-provider-types', name),
+    resolve(gdkResources, `GDK-${name}`)
   );
 }
 writeFileSync(
-  resolve(agentResources, 'runtime.json'),
+  resolve(gdkResources, 'runtime.json'),
   `${JSON.stringify({ apiKey, braveApiKey, model: 'gpt-6-luna' })}\n`,
   { mode: 0o600 }
 );
@@ -228,7 +226,7 @@ writeFileSync(
     directories: { ...packageBuild.directories, output: buildRoot },
     extraResources: [
       ...(packageBuild.extraResources ?? []),
-      { from: agentResources, to: 'sig-demo-agent' },
+      { from: gdkResources, to: 'sig-demo-gdk' },
       { from: meshResources, to: 'sig-demo-mesh' },
       ...(paidMeshResources
         ? [{ from: paidMeshResources, to: 'sig-demo-mesh/paid.json' }]
@@ -290,6 +288,21 @@ try {
   }
   if (attributes.status !== 0) {
     throw new Error('Failed to clean metadata from the built sig demo bundle.');
+  }
+  // The SDK dylib lives in Resources and is loaded through UniFFI. Sign it
+  // explicitly before sealing the app, including any install-name changes.
+  const nativeSigning = spawnSync(
+    '/usr/bin/codesign',
+    [
+      '--force',
+      '--sign',
+      '-',
+      resolve(app, 'Contents/Resources/sig-demo-gdk/libgoose_sdk.dylib'),
+    ],
+    { cwd: root, stdio: 'inherit' }
+  );
+  if (nativeSigning.error || nativeSigning.status !== 0) {
+    throw new Error('Native GDK signing failed.');
   }
   const signing = spawnSync(
     '/usr/bin/codesign',

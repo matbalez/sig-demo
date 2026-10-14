@@ -19,6 +19,7 @@ const external = [
   '@indutny/simple-windows-notifications',
   '@indutny/mac-screen-share',
   '@napi-rs/canvas',
+  'koffi',
   'electron',
   'fs-xattr',
   'fsevents',

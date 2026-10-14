@@ -1,0 +1,2383 @@
+// Copyright 2026 sig demo contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+// Generated from the SDK cdylib UniFFI metadata. Do not edit.
+export const uniffiSchema = {
+  buffers: {
+    allocate: {
+      arguments: ['uint64'],
+      return: 'rust_buffer',
+      status: true,
+      symbol: 'ffi_goose_sdk_rustbuffer_alloc',
+    },
+    free: {
+      arguments: ['rust_buffer'],
+      return: 'void',
+      status: true,
+      symbol: 'ffi_goose_sdk_rustbuffer_free',
+    },
+    fromBytes: {
+      arguments: ['foreignbytes'],
+      return: 'rust_buffer',
+      status: true,
+      symbol: 'ffi_goose_sdk_rustbuffer_from_bytes',
+    },
+  },
+  checksums: [
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_anthropic_default_model',
+      value: 46271,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_anthropic_provider',
+      value: 55562,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_databricks_default_model',
+      value: 23672,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_databricks_provider',
+      value: 50233,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_databricks_v2_default_model',
+      value: 33102,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_databricks_v2_provider',
+      value: 53942,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_declarative_provider_from_json',
+      value: 4245,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_default_compaction_templates',
+      value: 38211,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_groq_default_model',
+      value: 18828,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_groq_provider',
+      value: 18125,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_install_request_logger',
+      value: 51397,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_openai_default_model',
+      value: 44622,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_openai_provider',
+      value: 8314,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_openai_provider_simple',
+      value: 26668,
+    },
+    {
+      symbol:
+        'uniffi_goose_sdk_checksum_func_openrouter_decision_default_model',
+      value: 33590,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_openrouter_decision_provider',
+      value: 1462,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_typesafe_decision_default_model',
+      value: 14080,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_typesafe_decision_provider',
+      value: 6500,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_clear_observability_hook',
+      value: 36320,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_func_set_observability_hook',
+      value: 1691,
+    },
+    {
+      symbol:
+        'uniffi_goose_sdk_checksum_method_decisionprovider_create_decision',
+      value: 34699,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_compact',
+      value: 30260,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_complete',
+      value: 7354,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_context_limit',
+      value: 44600,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_list_models',
+      value: 22222,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_name',
+      value: 47431,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_stream',
+      value: 54150,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_provider_supported_features',
+      value: 1081,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_providerstream_next_chunk',
+      value: 52785,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_requestlogger_start',
+      value: 58172,
+    },
+    {
+      symbol: 'uniffi_goose_sdk_checksum_method_requestlogger_write',
+      value: 28158,
+    },
+    {
+      symbol:
+        'uniffi_goose_sdk_checksum_method_observabilityhook_on_request_start',
+      value: 37679,
+    },
+    {
+      symbol:
+        'uniffi_goose_sdk_checksum_method_observabilityhook_on_response_start',
+      value: 36565,
+    },
+    {
+      symbol:
+        'uniffi_goose_sdk_checksum_method_observabilityhook_on_request_end',
+      value: 1764,
+    },
+  ],
+  contractSymbol: 'ffi_goose_sdk_uniffi_contract_version',
+  contractVersion: 30,
+  enums: [
+    {
+      flat: false,
+      name: 'DecisionAnswer',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'noul',
+              type: {
+                kind: 'float64',
+              },
+            },
+          ],
+          name: 'Noul',
+        },
+        {
+          fields: [
+            {
+              name: 'choice',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'confidence',
+              type: {
+                kind: 'float64',
+              },
+            },
+            {
+              name: 'probabilities',
+              type: {
+                key: {
+                  kind: 'string',
+                },
+                kind: 'map',
+                value: {
+                  kind: 'float64',
+                },
+              },
+            },
+          ],
+          name: 'Choice',
+        },
+        {
+          fields: [
+            {
+              name: 'score',
+              type: {
+                kind: 'float64',
+              },
+            },
+            {
+              name: 'confidence',
+              type: {
+                kind: 'float64',
+              },
+            },
+            {
+              name: 'legend_json',
+              type: {
+                key: {
+                  kind: 'string',
+                },
+                kind: 'map',
+                value: {
+                  kind: 'string',
+                },
+              },
+            },
+            {
+              name: 'probabilities',
+              type: {
+                key: {
+                  kind: 'string',
+                },
+                kind: 'map',
+                value: {
+                  kind: 'float64',
+                },
+              },
+            },
+          ],
+          name: 'Score',
+        },
+      ],
+    },
+    {
+      flat: false,
+      name: 'DecisionQuestion',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'instructions',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'criteria',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'NoulCriteria',
+                },
+                kind: 'optional',
+              },
+            },
+          ],
+          name: 'Noul',
+        },
+        {
+          fields: [
+            {
+              name: 'instructions',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'criteria',
+              type: {
+                key: {
+                  kind: 'string',
+                },
+                kind: 'map',
+                value: {
+                  kind: 'string',
+                },
+              },
+            },
+          ],
+          name: 'Choice',
+        },
+        {
+          fields: [
+            {
+              name: 'instructions',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'criteria',
+              type: {
+                inner: {
+                  kind: 'string',
+                },
+                kind: 'sequence',
+              },
+            },
+          ],
+          name: 'Score',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'Feature',
+      variants: [
+        {
+          fields: [],
+          name: 'Tools',
+        },
+        {
+          fields: [],
+          name: 'Streaming',
+        },
+        {
+          fields: [],
+          name: 'Images',
+        },
+        {
+          fields: [],
+          name: 'Documents',
+        },
+        {
+          fields: [],
+          name: 'JsonSchema',
+        },
+        {
+          fields: [],
+          name: 'Reasoning',
+        },
+      ],
+    },
+    {
+      flat: false,
+      name: 'GooseError',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'retry_after_ms',
+              type: {
+                inner: {
+                  kind: 'uint64',
+                },
+                kind: 'optional',
+              },
+            },
+            {
+              name: 'retry_after_suffix',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'RateLimited',
+        },
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'OutputTokenLimitExceeded',
+        },
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'ContextLengthExceeded',
+        },
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Authentication',
+        },
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Timeout',
+        },
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'ProviderUnavailable',
+        },
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Generic',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'GooseStreamErrorKind',
+      variants: [
+        {
+          fields: [],
+          name: 'RateLimited',
+        },
+        {
+          fields: [],
+          name: 'OutputTokenLimitExceeded',
+        },
+        {
+          fields: [],
+          name: 'ContextLengthExceeded',
+        },
+        {
+          fields: [],
+          name: 'Authentication',
+        },
+        {
+          fields: [],
+          name: 'Timeout',
+        },
+        {
+          fields: [],
+          name: 'ProviderUnavailable',
+        },
+        {
+          fields: [],
+          name: 'Generic',
+        },
+      ],
+    },
+    {
+      flat: false,
+      name: 'MessageContent',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'text',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Text',
+        },
+        {
+          fields: [
+            {
+              name: 'mime_type',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'data',
+              type: {
+                kind: 'bytes',
+              },
+            },
+          ],
+          name: 'Image',
+        },
+        {
+          fields: [
+            {
+              name: 'mime_type',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'data',
+              type: {
+                kind: 'bytes',
+              },
+            },
+            {
+              name: 'name',
+              type: {
+                inner: {
+                  kind: 'string',
+                },
+                kind: 'optional',
+              },
+            },
+          ],
+          name: 'Document',
+        },
+        {
+          fields: [
+            {
+              name: 'id',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'name',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'arguments_json',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              default: null,
+              name: 'provider_metadata_json',
+              type: {
+                inner: {
+                  kind: 'string',
+                },
+                kind: 'optional',
+              },
+            },
+            {
+              default: null,
+              name: 'tool_error_json',
+              type: {
+                inner: {
+                  kind: 'string',
+                },
+                kind: 'optional',
+              },
+            },
+          ],
+          name: 'ToolRequest',
+        },
+        {
+          fields: [
+            {
+              name: 'id',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'success',
+              type: {
+                kind: 'boolean',
+              },
+            },
+            {
+              name: 'content_json',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'ToolResult',
+        },
+        {
+          fields: [
+            {
+              name: 'thinking',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'signature',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Thinking',
+        },
+        {
+          fields: [
+            {
+              name: 'data',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'RedactedThinking',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'MessageRole',
+      variants: [
+        {
+          fields: [],
+          name: 'User',
+        },
+        {
+          fields: [],
+          name: 'Assistant',
+        },
+        {
+          fields: [],
+          name: 'Tool',
+        },
+      ],
+    },
+    {
+      flat: false,
+      name: 'StreamChunk',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'text',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'TextChunk',
+        },
+        {
+          fields: [
+            {
+              name: 'id',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'name',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'arguments_json',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'index',
+              type: {
+                inner: {
+                  kind: 'int32',
+                },
+                kind: 'optional',
+              },
+            },
+            {
+              default: null,
+              name: 'provider_metadata_json',
+              type: {
+                inner: {
+                  kind: 'string',
+                },
+                kind: 'optional',
+              },
+            },
+          ],
+          name: 'ToolChunk',
+        },
+        {
+          fields: [
+            {
+              name: 'thinking',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'signature',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'ThinkingChunk',
+        },
+        {
+          fields: [
+            {
+              name: 'data',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'RedactedThinkingChunk',
+        },
+        {
+          fields: [
+            {
+              name: 'usage',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'Usage',
+                },
+                kind: 'optional',
+              },
+            },
+          ],
+          name: 'EndChunk',
+        },
+        {
+          fields: [
+            {
+              name: 'error',
+              type: {
+                kind: 'record',
+                name: 'GooseStreamError',
+              },
+            },
+          ],
+          name: 'ErrorChunk',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'RequestOperation',
+      variants: [
+        {
+          fields: [],
+          name: 'Complete',
+        },
+        {
+          fields: [],
+          name: 'Stream',
+        },
+      ],
+    },
+    {
+      flat: false,
+      name: 'RequestOutcome',
+      variants: [
+        {
+          fields: [],
+          name: 'Success',
+        },
+        {
+          fields: [
+            {
+              name: 'error',
+              type: {
+                kind: 'record',
+                name: 'GooseStreamError',
+              },
+            },
+          ],
+          name: 'Failure',
+        },
+      ],
+    },
+  ],
+  functions: [
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_anthropic_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'anthropic_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'api_key',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'base_url',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'beta_headers',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'sequence',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_anthropic_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'anthropic_provider',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_databricks_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'databricks_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'host',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'token',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_databricks_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'databricks_provider',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_databricks_v2_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'databricks_v2_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'host',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'token',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'gateway_path',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_databricks_v2_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'databricks_v2_provider',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'json',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_declarative_provider_from_json',
+      },
+      futureFlavor: 'u64',
+      name: 'declarative_provider_from_json',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_default_compaction_templates',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'default_compaction_templates',
+      return: {
+        kind: 'record',
+        name: 'CompactionTemplates',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_groq_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'groq_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'api_key',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_groq_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'groq_provider',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'logger',
+          type: {
+            kind: 'callback',
+            name: 'RequestLogger',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_install_request_logger',
+      },
+      futureFlavor: 'void',
+      name: 'install_request_logger',
+      return: null,
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_openai_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'openai_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'api_key',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'base_url',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_openai_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'openai_provider',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'api_key',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_openai_provider_simple',
+      },
+      futureFlavor: 'u64',
+      name: 'openai_provider_simple',
+      return: {
+        kind: 'object',
+        name: 'Provider',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_openrouter_decision_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'openrouter_decision_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'api_key',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'base_url',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_openrouter_decision_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'openrouter_decision_provider',
+      return: {
+        kind: 'object',
+        name: 'DecisionProvider',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_typesafe_decision_default_model',
+      },
+      futureFlavor: 'rust_buffer',
+      name: 'typesafe_decision_default_model',
+      return: {
+        kind: 'string',
+      },
+    },
+    {
+      arguments: [
+        {
+          name: 'api_key',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'base_url',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      async: false,
+      error: 'GooseError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_typesafe_decision_provider',
+      },
+      futureFlavor: 'u64',
+      name: 'typesafe_decision_provider',
+      return: {
+        kind: 'object',
+        name: 'DecisionProvider',
+      },
+    },
+    {
+      arguments: [],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: [],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_clear_observability_hook',
+      },
+      futureFlavor: 'void',
+      name: 'clear_observability_hook',
+      return: null,
+    },
+    {
+      arguments: [
+        {
+          name: 'hook',
+          type: {
+            kind: 'callback',
+            name: 'ObservabilityHook',
+          },
+        },
+        {
+          name: 'capture_payloads',
+          type: {
+            kind: 'boolean',
+          },
+        },
+      ],
+      async: false,
+      error: null,
+      ffi: {
+        arguments: ['uint64', 'int8'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_func_set_observability_hook',
+      },
+      futureFlavor: 'void',
+      name: 'set_observability_hook',
+      return: null,
+    },
+  ],
+  futures: {
+    rust_buffer: {
+      cancel: 'ffi_goose_sdk_rust_future_cancel_rust_buffer',
+      complete: {
+        arguments: ['uint64'],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'ffi_goose_sdk_rust_future_complete_rust_buffer',
+      },
+      free: 'ffi_goose_sdk_rust_future_free_rust_buffer',
+      poll: 'ffi_goose_sdk_rust_future_poll_rust_buffer',
+    },
+    u64: {
+      cancel: 'ffi_goose_sdk_rust_future_cancel_u64',
+      complete: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'ffi_goose_sdk_rust_future_complete_u64',
+      },
+      free: 'ffi_goose_sdk_rust_future_free_u64',
+      poll: 'ffi_goose_sdk_rust_future_poll_u64',
+    },
+    void: {
+      cancel: 'ffi_goose_sdk_rust_future_cancel_void',
+      complete: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'ffi_goose_sdk_rust_future_complete_void',
+      },
+      free: 'ffi_goose_sdk_rust_future_free_void',
+      poll: 'ffi_goose_sdk_rust_future_poll_void',
+    },
+  },
+  namespace: 'goose',
+  objects: [
+    {
+      clone: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_clone_decisionprovider',
+      },
+      free: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_free_decisionprovider',
+      },
+      methods: [
+        {
+          arguments: [
+            {
+              name: 'request',
+              type: {
+                kind: 'record',
+                name: 'DecisionRequest',
+              },
+            },
+          ],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: ['uint64', 'rust_buffer'],
+            return: 'uint64',
+            status: false,
+            symbol:
+              'uniffi_goose_sdk_fn_method_decisionprovider_create_decision',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'create_decision',
+          return: {
+            kind: 'record',
+            name: 'DecisionResponse',
+          },
+        },
+      ],
+      name: 'DecisionProvider',
+    },
+    {
+      clone: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_clone_provider',
+      },
+      free: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_free_provider',
+      },
+      methods: [
+        {
+          arguments: [
+            {
+              name: 'model_name',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'messages',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'CompactionMessage',
+                },
+                kind: 'sequence',
+              },
+            },
+            {
+              name: 'templates',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'CompactionTemplates',
+                },
+                kind: 'optional',
+              },
+            },
+          ],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: ['uint64', 'rust_buffer', 'rust_buffer', 'rust_buffer'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_compact',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'compact',
+          return: {
+            kind: 'record',
+            name: 'CompactionSummary',
+          },
+        },
+        {
+          arguments: [
+            {
+              name: 'model',
+              type: {
+                kind: 'record',
+                name: 'ProviderModelConfig',
+              },
+            },
+            {
+              name: 'system',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'messages',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'ProviderMessage',
+                },
+                kind: 'sequence',
+              },
+            },
+            {
+              name: 'tools',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'ProviderTool',
+                },
+                kind: 'sequence',
+              },
+            },
+          ],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: [
+              'uint64',
+              'rust_buffer',
+              'rust_buffer',
+              'rust_buffer',
+              'rust_buffer',
+            ],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_complete',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'complete',
+          return: {
+            kind: 'record',
+            name: 'ProviderCompletion',
+          },
+        },
+        {
+          arguments: [
+            {
+              name: 'model',
+              type: {
+                kind: 'record',
+                name: 'ProviderModelConfig',
+              },
+            },
+          ],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: ['uint64', 'rust_buffer'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_context_limit',
+          },
+          futureFlavor: 'u64',
+          name: 'context_limit',
+          return: {
+            kind: 'uint64',
+          },
+        },
+        {
+          arguments: [],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: ['uint64'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_list_models',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'list_models',
+          return: {
+            inner: {
+              kind: 'record',
+              name: 'ProviderModelInfo',
+            },
+            kind: 'sequence',
+          },
+        },
+        {
+          arguments: [],
+          async: false,
+          error: null,
+          ffi: {
+            arguments: ['uint64'],
+            return: 'rust_buffer',
+            status: true,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_name',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'name',
+          return: {
+            kind: 'string',
+          },
+        },
+        {
+          arguments: [
+            {
+              name: 'model',
+              type: {
+                kind: 'record',
+                name: 'ProviderModelConfig',
+              },
+            },
+            {
+              name: 'system',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'messages',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'ProviderMessage',
+                },
+                kind: 'sequence',
+              },
+            },
+            {
+              name: 'tools',
+              type: {
+                inner: {
+                  kind: 'record',
+                  name: 'ProviderTool',
+                },
+                kind: 'sequence',
+              },
+            },
+          ],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: [
+              'uint64',
+              'rust_buffer',
+              'rust_buffer',
+              'rust_buffer',
+              'rust_buffer',
+            ],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_stream',
+          },
+          futureFlavor: 'u64',
+          name: 'stream',
+          return: {
+            kind: 'object',
+            name: 'ProviderStream',
+          },
+        },
+        {
+          arguments: [],
+          async: false,
+          error: null,
+          ffi: {
+            arguments: ['uint64'],
+            return: 'rust_buffer',
+            status: true,
+            symbol: 'uniffi_goose_sdk_fn_method_provider_supported_features',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'supported_features',
+          return: {
+            inner: {
+              kind: 'enum',
+              name: 'Feature',
+            },
+            kind: 'sequence',
+          },
+        },
+      ],
+      name: 'Provider',
+    },
+    {
+      clone: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_clone_providerstream',
+      },
+      free: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_goose_sdk_fn_free_providerstream',
+      },
+      methods: [
+        {
+          arguments: [],
+          async: true,
+          error: 'GooseError',
+          ffi: {
+            arguments: ['uint64'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_goose_sdk_fn_method_providerstream_next_chunk',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'next_chunk',
+          return: {
+            inner: {
+              kind: 'enum',
+              name: 'StreamChunk',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'ProviderStream',
+    },
+  ],
+  records: [
+    {
+      fields: [
+        {
+          name: 'role',
+          type: {
+            kind: 'enum',
+            name: 'MessageRole',
+          },
+        },
+        {
+          name: 'text',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      name: 'CompactionMessage',
+    },
+    {
+      fields: [
+        {
+          name: 'text',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'input_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'output_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'total_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'cache_read_input_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'cache_creation_input_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'CompactionSummary',
+    },
+    {
+      fields: [
+        {
+          name: 'compaction',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'summary',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      name: 'CompactionTemplates',
+    },
+    {
+      fields: [
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'state_json',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'questions',
+          type: {
+            key: {
+              kind: 'string',
+            },
+            kind: 'map',
+            value: {
+              kind: 'enum',
+              name: 'DecisionQuestion',
+            },
+          },
+        },
+      ],
+      name: 'DecisionRequest',
+    },
+    {
+      fields: [
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'answers',
+          type: {
+            key: {
+              kind: 'string',
+            },
+            kind: 'map',
+            value: {
+              kind: 'enum',
+              name: 'DecisionAnswer',
+            },
+          },
+        },
+        {
+          name: 'input_tokens',
+          type: {
+            inner: {
+              kind: 'uint64',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'output_tokens',
+          type: {
+            inner: {
+              kind: 'uint64',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'cost',
+          type: {
+            inner: {
+              kind: 'float64',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'id',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'provider',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'DecisionResponse',
+    },
+    {
+      fields: [
+        {
+          name: 'kind',
+          type: {
+            kind: 'enum',
+            name: 'GooseStreamErrorKind',
+          },
+        },
+        {
+          name: 'message',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'retry_after_ms',
+          type: {
+            inner: {
+              kind: 'uint64',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'request_id',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'GooseStreamError',
+    },
+    {
+      fields: [
+        {
+          name: 'true_description',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'false_description',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      name: 'NoulCriteria',
+    },
+    {
+      fields: [
+        {
+          name: 'message_json',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'content',
+          type: {
+            inner: {
+              kind: 'enum',
+              name: 'MessageContent',
+            },
+            kind: 'sequence',
+          },
+        },
+        {
+          name: 'usage',
+          type: {
+            inner: {
+              kind: 'record',
+              name: 'Usage',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'ProviderCompletion',
+    },
+    {
+      fields: [
+        {
+          name: 'role',
+          type: {
+            kind: 'enum',
+            name: 'MessageRole',
+          },
+        },
+        {
+          name: 'content',
+          type: {
+            inner: {
+              kind: 'enum',
+              name: 'MessageContent',
+            },
+            kind: 'sequence',
+          },
+        },
+      ],
+      name: 'ProviderMessage',
+    },
+    {
+      fields: [
+        {
+          name: 'model_name',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          default: null,
+          name: 'context_limit',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'temperature',
+          type: {
+            inner: {
+              kind: 'float32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'max_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: false,
+          name: 'toolshim',
+          type: {
+            kind: 'boolean',
+          },
+        },
+        {
+          default: null,
+          name: 'toolshim_model',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'request_params_json',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'provider_params_json',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'reasoning',
+          type: {
+            inner: {
+              kind: 'boolean',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'timeout_ms',
+          type: {
+            inner: {
+              kind: 'uint64',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          default: null,
+          name: 'request_headers',
+          type: {
+            inner: {
+              key: {
+                kind: 'string',
+              },
+              kind: 'map',
+              value: {
+                kind: 'string',
+              },
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'ProviderModelConfig',
+    },
+    {
+      fields: [
+        {
+          name: 'name',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'context_limit',
+          type: {
+            inner: {
+              kind: 'uint64',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'supports_reasoning',
+          type: {
+            kind: 'boolean',
+          },
+        },
+      ],
+      name: 'ProviderModelInfo',
+    },
+    {
+      fields: [
+        {
+          name: 'name',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'description',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'input_schema_json',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          default: null,
+          name: 'annotations_json',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'ProviderTool',
+    },
+    {
+      fields: [
+        {
+          name: 'input_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'output_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'total_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'cache_read_input_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'cache_creation_input_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'reasoning_tokens',
+          type: {
+            inner: {
+              kind: 'int32',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'request_id',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'provider_metadata_json',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'additional_data_json',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'Usage',
+    },
+    {
+      fields: [
+        {
+          name: 'request_id',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'provider',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'operation',
+          type: {
+            kind: 'enum',
+            name: 'RequestOperation',
+          },
+        },
+        {
+          name: 'outcome',
+          type: {
+            kind: 'enum',
+            name: 'RequestOutcome',
+          },
+        },
+        {
+          name: 'duration_ms',
+          type: {
+            kind: 'uint64',
+          },
+        },
+        {
+          name: 'usage',
+          type: {
+            inner: {
+              kind: 'record',
+              name: 'Usage',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'response_json',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'RequestEndEvent',
+    },
+    {
+      fields: [
+        {
+          name: 'system',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'messages_json',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'tools_json',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      name: 'RequestPayload',
+    },
+    {
+      fields: [
+        {
+          name: 'request_id',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'provider',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'operation',
+          type: {
+            kind: 'enum',
+            name: 'RequestOperation',
+          },
+        },
+        {
+          name: 'payload',
+          type: {
+            inner: {
+              kind: 'record',
+              name: 'RequestPayload',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'RequestStartEvent',
+    },
+    {
+      fields: [
+        {
+          name: 'request_id',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'provider',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'operation',
+          type: {
+            kind: 'enum',
+            name: 'RequestOperation',
+          },
+        },
+        {
+          name: 'elapsed_ms',
+          type: {
+            kind: 'uint64',
+          },
+        },
+      ],
+      name: 'ResponseStartEvent',
+    },
+  ],
+  sdkVersion: '0.1.0-alpha.12',
+  uniffiVersion: '0.32.2',
+} as const;
