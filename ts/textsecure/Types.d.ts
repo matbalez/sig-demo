@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import type * as client from '@signalapp/libsignal-client';
+import type { SigDemoAgentFrame } from '../util/sigDemoAgent.std.ts';
 
 import type { SignalService as Proto } from '../protobuf/index.std.ts';
 import type { IncomingWebSocketRequest } from './WebsocketResources.preload.ts';
@@ -254,6 +255,7 @@ export type ProcessedStoryContext = {
 };
 
 export type ProcessedDataMessage = {
+  sigDemoAgentResponse?: SigDemoAgentFrame;
   body?: string;
   bodyAttachment?: ProcessedAttachment;
   attachments: ReadonlyArray<ProcessedAttachment>;

@@ -9,7 +9,10 @@ import type Quill from '@signalapp/quill-cjs';
 import type Keyboard from '@signalapp/quill-cjs/modules/keyboard.js';
 
 import type { MutableRefObject } from 'react';
-import type { MentionCompletionOptions } from '../../../quill/mentions/completion.dom.tsx';
+import type {
+  MentionCompletionOptions,
+  MentionResult,
+} from '../../../quill/mentions/completion.dom.tsx';
 import { MentionCompletion } from '../../../quill/mentions/completion.dom.tsx';
 import type { ConversationType } from '../../../state/ducks/conversations.preload.ts';
 import {
@@ -117,7 +120,7 @@ describe('MentionCompletion', () => {
   describe('onTextChange', () => {
     let possiblyShowMemberResultsStub: sinon.SinonStub<
       [],
-      ReadonlyArray<MemberType>
+      ReadonlyArray<MentionResult>
     >;
 
     beforeEach(() => {

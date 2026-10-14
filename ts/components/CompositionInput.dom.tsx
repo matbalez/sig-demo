@@ -924,6 +924,7 @@ export function CompositionInput(props: Props): ReactElement {
               setFormattingChooserElement,
             },
             mentionCompletion: {
+              sigDemoEnabled: window.SignalContext?.config?.sigDemoEnabled,
               getPreferredBadge,
               memberRepositoryRef,
               setMentionPickerElement: setMentionCompletionElement,

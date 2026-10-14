@@ -105,6 +105,7 @@ import type {
 } from '../types/PinnedMessage.std.ts';
 import type { Emoji } from '../axo/emoji.std.ts';
 import type { BlockedNumber } from '../types/StorageKeys.std.ts';
+import type { SigDemoAgentFrame } from '../util/sigDemoAgent.std.ts';
 
 const log = createLogger('SendMessage');
 
@@ -206,6 +207,7 @@ export type SendDeleteForEveryoneType = Readonly<{
 }>;
 
 export type SharedMessageOptionsType = Readonly<{
+  sigDemoAgentResponse?: SigDemoAgentFrame;
   // required
   timestamp: number;
   // optional
@@ -266,6 +268,7 @@ export type PollTerminateBuildOptions = Readonly<{
   >;
 
 class Message {
+  sigDemoAgentResponse?: SigDemoAgentFrame;
   attachments: ReadonlyArray<Proto.AttachmentPointer.Params>;
 
   body?: string;
@@ -318,6 +321,7 @@ class Message {
   pollVote?: OutgoingPollVote;
 
   constructor(options: MessageOptionsType) {
+    this.sigDemoAgentResponse = options.sigDemoAgentResponse;
     this.attachments = options.attachments || [];
     this.body = options.body;
     this.bodyRanges = options.bodyRanges;
@@ -622,6 +626,12 @@ class Message {
 
     let incrementalMacsIncluded = 0;
     const dataMessage: Proto.DataMessage.Params = {
+      sigDemoAgentResponse: this.sigDemoAgentResponse
+        ? {
+            ...this.sigDemoAgentResponse,
+            queryTimestamp: BigInt(this.sigDemoAgentResponse.queryTimestamp),
+          }
+        : null,
       timestamp: BigInt(this.timestamp),
       attachments: this.attachments.map(attachment => {
         if (attachment.incrementalMac != null) {
@@ -858,6 +868,7 @@ export class MessageSender {
     pollVote,
   }: PollVoteBuildOptions): Proto.DataMessage.Params {
     return {
+      sigDemoAgentResponse: null,
       timestamp: BigInt(timestamp),
       groupV2: groupV2
         ? {
@@ -955,6 +966,7 @@ export class MessageSender {
     pollTerminate,
   }: PollTerminateBuildOptions): Proto.DataMessage.Params {
     return {
+      sigDemoAgentResponse: null,
       timestamp: BigInt(timestamp),
       groupV2: groupV2
         ? {
@@ -1168,6 +1180,7 @@ export class MessageSender {
     options: Readonly<GroupMessageOptionsType>
   ): MessageOptionsType {
     const {
+      sigDemoAgentResponse,
       deleteForEveryone,
       attachments,
       bodyRanges,
@@ -1217,6 +1230,7 @@ export class MessageSender {
     );
 
     return {
+      sigDemoAgentResponse,
       deleteForEveryone,
       attachments,
       bodyRanges,

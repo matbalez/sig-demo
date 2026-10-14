@@ -22,6 +22,11 @@ import type {
 } from '../smart/MessageDetail.preload.tsx';
 import type { TimelineItemType } from '../../components/conversation/TimelineItem.dom.tsx';
 import type { PropsData } from '../../components/conversation/Message.dom.tsx';
+import {
+  SIG_DEMO_AGENT_ID,
+  SIG_DEMO_AGENT_NAME,
+  SIG_DEMO_AGENT_AVATAR,
+} from '../../util/sigDemoAgentIdentity.std.ts';
 import type { PropsData as TimelineMessagePropsData } from '../../components/conversation/TimelineMessage.dom.tsx';
 import { TextDirection } from '../../components/conversation/Message.dom.tsx';
 import type { PropsData as TimerNotificationProps } from '../../components/conversation/TimerNotification.dom.tsx';
@@ -914,7 +919,22 @@ const getPropsForMessage = (
   );
   const { hasMediaBackups } = options;
   const attachments = getAttachmentsForMessage(message, { hasMediaBackups });
-  const author = getAuthorForMessage(message, options);
+  const sigDemoAgentResponse = message.sigDemoAgentResponse;
+  const transportAuthor = getAuthorForMessage(message, options);
+  const author = sigDemoAgentResponse
+    ? {
+        ...transportAuthor,
+        id: SIG_DEMO_AGENT_ID,
+        title: SIG_DEMO_AGENT_NAME,
+        firstName: SIG_DEMO_AGENT_NAME,
+        profileName: SIG_DEMO_AGENT_NAME,
+        phoneNumber: undefined,
+        avatarUrl: SIG_DEMO_AGENT_AVATAR,
+        hasAvatar: true,
+        badges: [],
+        isMe: false,
+      }
+    : transportAuthor;
   const previews = getPreviewsForMessage(message, { hasMediaBackups });
   const reactions = getReactionsForMessage(message, options);
 
@@ -1002,6 +1022,7 @@ const getPropsForMessage = (
     ),
     attachmentDroppedDueToSize,
     author,
+    sigDemoAgentResponse,
     bodyRanges,
     activeCallConversationId,
     previews,
@@ -1018,7 +1039,8 @@ const getPropsForMessage = (
     callToActionId,
     callToActionText,
     canCopy: canCopy(message),
-    canEditMessage: canEditMessage(message) && !isGroupTerminated,
+    canEditMessage:
+      !sigDemoAgentResponse && canEditMessage(message) && !isGroupTerminated,
     canDeleteForEveryone: canDeleteForEveryoneInSelector(message, {
       conversation,
       ourAci,
@@ -1036,8 +1058,8 @@ const getPropsForMessage = (
     }),
     canSendPollVote: !isGroupTerminated,
     contact: getPropsForEmbeddedContact(message, regionCode, accountSelector),
-    contactLabel,
-    contactNameColor,
+    contactLabel: sigDemoAgentResponse ? undefined : contactLabel,
+    contactNameColor: sigDemoAgentResponse ? undefined : contactNameColor,
     conversationColor,
     conversationId,
     conversationTitle: conversation.title,
@@ -1049,7 +1071,8 @@ const getPropsForMessage = (
       contactNameColors,
       ourAci,
     }),
-    direction: isIncoming(message) ? 'incoming' : 'outgoing',
+    direction:
+      sigDemoAgentResponse || isIncoming(message) ? 'incoming' : 'outgoing',
     displayLimit: message.displayLimit,
     expirationLength,
     expirationTimestamp: calculateExpirationTimestamp({
@@ -1083,7 +1106,9 @@ const getPropsForMessage = (
     isVoiceMessagePlayed: isVoiceMessagePlayed(message, ourConversationId),
     readStatus: message.readStatus ?? ReadStatus.Read,
     selectedReaction,
-    status: getMessagePropStatus(message, ourConversationId),
+    status: sigDemoAgentResponse
+      ? undefined
+      : getMessagePropStatus(message, ourConversationId),
     text: message.body,
     textDirection: getTextDirection(message.body),
     timestamp: getMessageSentTimestamp(message, { includeEdits: false, log }),

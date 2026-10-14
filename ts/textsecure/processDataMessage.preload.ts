@@ -62,6 +62,7 @@ import { createLogger } from '../logging/log.std.ts';
 
 import { toNumber } from '../util/toNumber.std.ts';
 import { Emoji } from '../axo/emoji.std.ts';
+import { parseSigDemoAgentFrame } from '../util/sigDemoAgent.std.ts';
 import { DurationSecs, SentTimestampMs } from '@signalapp/types';
 
 const { isNumber } = lodash;
@@ -669,6 +670,7 @@ export function processDataMessage(
     );
   }
   const result: ProcessedDataMessage = {
+    sigDemoAgentResponse: parseSigDemoAgentFrame(message.sigDemoAgentResponse),
     body: message.body ?? '',
     bodyAttachment,
     attachments: renderableAttachments,

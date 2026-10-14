@@ -10,6 +10,7 @@ import { isIncoming, isOutgoing } from '../state/selectors/message.preload.ts';
 import { isAciString } from './isAciString.std.ts';
 import { getTitle } from './getTitle.preload.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
+import { SIG_DEMO_AGENT_NAME } from './sigDemoAgentIdentity.std.ts';
 
 function getIncomingContact(
   messageAttributes: ReadonlyMessageAttributesType
@@ -32,6 +33,10 @@ export function getMessageAuthorText(
 ): string | undefined {
   if (!messageAttributes) {
     return undefined;
+  }
+
+  if (messageAttributes.sigDemoAgentResponse) {
+    return SIG_DEMO_AGENT_NAME;
   }
 
   // if it's outgoing, it must be self-authored

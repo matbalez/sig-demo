@@ -13,6 +13,7 @@ $is-storybook: false !default;
 
 // Old style: modules
 @use 'modules';
+@use 'components/SigDemoAgent.scss';
 
 // New style: components
 @use 'components/About.scss';

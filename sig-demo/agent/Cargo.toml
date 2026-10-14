@@ -1,0 +1,21 @@
+# Copyright 2026 Sig Demo contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+[package]
+name = "sig-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.94.1"
+license = "AGPL-3.0-only"
+publish = false
+
+[dependencies]
+goose-sdk = { version = "=0.1.0-alpha.12", features = ["uniffi"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

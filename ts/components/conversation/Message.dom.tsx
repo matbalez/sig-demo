@@ -219,6 +219,12 @@ export type PropsData = {
   displayLimit?: number;
   activeCallConversationId?: string;
   text?: string;
+  sigDemoAgentResponse?: Readonly<{
+    queryId: string;
+    queryTimestamp: number;
+    sequence: number;
+    status: 'streaming' | 'complete' | 'error';
+  }>;
   textDirection: TextDirection;
   textAttachment?: AttachmentForUIType;
   isEditedMessage?: boolean;
@@ -949,6 +955,9 @@ export class Message extends PureComponent<Props, State> {
   }
 
   #shouldRenderAuthor(): boolean {
+    if (this.props.sigDemoAgentResponse) {
+      return true;
+    }
     const { author, conversationType, direction, shouldCollapseAbove } =
       this.props;
     return Boolean(
@@ -2281,7 +2290,10 @@ export class Message extends PureComponent<Props, State> {
       theme,
     } = this.props;
 
-    if (conversationType !== 'group' || direction !== 'incoming') {
+    if (
+      (conversationType !== 'group' && !this.props.sigDemoAgentResponse) ||
+      direction !== 'incoming'
+    ) {
       return null;
     }
 
@@ -2293,7 +2305,7 @@ export class Message extends PureComponent<Props, State> {
         })}
         inert={isSelectMode ? true : undefined}
       >
-        {shouldCollapseBelow ? (
+        {shouldCollapseBelow && !this.props.sigDemoAgentResponse ? (
           <AvatarSpacer size={GROUP_AVATAR_SIZE} />
         ) : (
           <Avatar
@@ -2306,6 +2318,9 @@ export class Message extends PureComponent<Props, State> {
               event.stopPropagation();
               event.preventDefault();
 
+              if (this.props.sigDemoAgentResponse) {
+                return;
+              }
               showContactModal({ contactId: author.id, conversationId });
             }}
             phoneNumber={author.phoneNumber}
@@ -2408,13 +2423,18 @@ export class Message extends PureComponent<Props, State> {
       showConversation,
       showSpoiler,
       status,
+      sigDemoAgentResponse,
 
       textAttachment,
     } = this.props;
     const { metadataWidth } = this.state;
 
     const messageStatusContents = this.#getMessageStatusContents();
-    if (messageStatusContents == null && text == null) {
+    if (
+      messageStatusContents == null &&
+      text == null &&
+      !sigDemoAgentResponse
+    ) {
       return null;
     }
 
@@ -2482,6 +2502,21 @@ export class Message extends PureComponent<Props, State> {
             text={text}
             textAttachment={textAttachment}
           />
+        )}
+        {sigDemoAgentResponse?.status === 'streaming' &&
+          text !== i18n('icu:SigDemoAgent--streaming') && (
+            <div className="sig-demo-agent-status" role="status">
+              <span className="sig-demo-agent-status__dot" aria-hidden />
+              {i18n('icu:SigDemoAgent--streaming')}
+            </div>
+          )}
+        {sigDemoAgentResponse?.status === 'error' && (
+          <div
+            className="sig-demo-agent-status sig-demo-agent-status--error"
+            role="status"
+          >
+            {i18n('icu:SigDemoAgent--error')}
+          </div>
         )}
         {this.#getMetadataPlacement() === MetadataPlacement.InlineWithText && (
           <MessageTextMetadataSpacer metadataWidth={metadataWidth} />
@@ -3566,8 +3601,12 @@ export class Message extends PureComponent<Props, State> {
             'module-message',
             `module-message--${direction}`,
             isSignalConversation ? tw('justify-center') : null,
-            shouldCollapseAbove && 'module-message--collapsed-above',
-            shouldCollapseBelow && 'module-message--collapsed-below',
+            shouldCollapseAbove &&
+              !this.props.sigDemoAgentResponse &&
+              'module-message--collapsed-above',
+            shouldCollapseBelow &&
+              !this.props.sigDemoAgentResponse &&
+              'module-message--collapsed-below',
             isTargeted ? 'module-message--targeted' : null,
             expiring ? 'module-message--expired' : null,
             flashing ? 'module-message--flashing' : null

@@ -31,6 +31,7 @@ const TIMESTAMP = Date.now();
 const CLIENT_UUID = generateUuid();
 
 const EMPTY_DATA_MESSAGE: Proto.DataMessage.Params = {
+  sigDemoAgentResponse: null,
   body: null,
   attachments: null,
   groupV2: null,

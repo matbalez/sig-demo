@@ -63,6 +63,7 @@ import config from './config.main.ts';
 import { assertSigDemoNetworkConfig } from '../ts/util/sigDemoIsolation.std.ts';
 import { startSigDemoRelay } from '../ts/util/sigDemoRelay.node.ts';
 import type { SigDemoRelayConfig } from '../ts/util/sigDemoIsolation.std.ts';
+import { setupSigDemoAgent } from './SigDemoAgent.main.ts';
 import {
   Environment,
   getEnvironment,
@@ -184,6 +185,8 @@ let mainWindow: BrowserWindow | undefined;
 let mainWindowCreated = false;
 let loadingWindow: BrowserWindow | undefined;
 let sigDemoRelay: Awaited<ReturnType<typeof startSigDemoRelay>> | undefined;
+
+setupSigDemoAgent(() => mainWindow?.webContents);
 
 // These will be set after app fires the 'ready' event
 let preferredSystemLocales: Array<string> | undefined;

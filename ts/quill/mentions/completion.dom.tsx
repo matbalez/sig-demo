@@ -20,6 +20,32 @@ import type { MentionBlotValue } from '../util.dom.ts';
 import { handleOutsideClick } from '../../util/handleOutsideClick.dom.ts';
 import { sameWidthModifier } from '../../util/popperUtil.std.ts';
 import { UserText } from '../../components/UserText.dom.tsx';
+import {
+  SIG_DEMO_AGENT_ID,
+  SIG_DEMO_AGENT_NAME,
+  SIG_DEMO_AGENT_AVATAR,
+} from '../../util/sigDemoAgentIdentity.std.ts';
+
+type SigDemoAgentSuggestion = Readonly<{
+  sigDemoAgent: true;
+  id: string;
+  name: string;
+  title: string;
+}>;
+export type MentionResult = MemberType | SigDemoAgentSuggestion;
+
+function isSigDemoAgentSuggestion(
+  result: MentionResult
+): result is SigDemoAgentSuggestion {
+  return 'sigDemoAgent' in result && result.sigDemoAgent;
+}
+
+const SIG_DEMO_AGENT_SUGGESTION: SigDemoAgentSuggestion = {
+  sigDemoAgent: true,
+  id: SIG_DEMO_AGENT_ID,
+  name: SIG_DEMO_AGENT_NAME,
+  title: SIG_DEMO_AGENT_NAME,
+};
 
 export type MentionCompletionOptions = {
   getPreferredBadge: PreferredBadgeSelectorType;
@@ -28,6 +54,7 @@ export type MentionCompletionOptions = {
   setMentionPickerElement: (element: JSX.Element | null) => void;
   ourConversationId: string | undefined;
   theme: ThemeType;
+  sigDemoEnabled?: boolean;
 };
 
 const MENTION_REGEX = /(?:^|\W)@([-+\p{L}\p{M}\p{N}]*)$/u;
@@ -35,7 +62,7 @@ type MentionRegexMatch = RegExpMatchArray & { 1: string };
 
 // oxlint-disable-next-line react/prefer-function-component
 export class MentionCompletion {
-  results: ReadonlyArray<MemberType>;
+  results: ReadonlyArray<MentionResult>;
 
   index: number;
 
@@ -115,7 +142,7 @@ export class MentionCompletion {
     this.clearResults();
   }
 
-  possiblyShowMemberResults(): ReadonlyArray<MemberType> {
+  possiblyShowMemberResults(): ReadonlyArray<MentionResult> {
     const range = this.quill.getSelection();
 
     if (range) {
@@ -148,6 +175,12 @@ export class MentionCompletion {
           }
         }
 
+        if (
+          this.options.sigDemoEnabled &&
+          'sig'.startsWith(leftTokenText.toLowerCase())
+        ) {
+          return [SIG_DEMO_AGENT_SUGGESTION, ...results];
+        }
         return results;
       }
     }
@@ -168,7 +201,7 @@ export class MentionCompletion {
   }
 
   completeMention(resultIndexArg?: number): void {
-    const resultIndex = resultIndexArg || this.index;
+    const resultIndex = resultIndexArg ?? this.index;
 
     const range = this.quill.getSelection();
 
@@ -191,13 +224,25 @@ export class MentionCompletion {
 
     if (leftTokenTextMatch) {
       const [, leftTokenText] = leftTokenTextMatch as MentionRegexMatch;
+      const start = range.index - leftTokenText.length - 1;
+      if (isSigDemoAgentSuggestion(member)) {
+        // Sig is a virtual chat helper, not a contact or group member. Keep its
+        // invocation as normal text rather than emitting a mention ACI.
+        const text = '@sig ';
+        const attributes = this.getAttributesForInsert(start);
+        this.quill.updateContents(
+          new Delta()
+            .retain(start)
+            .delete(leftTokenText.length + 1)
+            .insert(text, attributes),
+          'user'
+        );
+        this.quill.setSelection(start + text.length, 0, 'user');
+        this.clearResults();
+        return;
+      }
 
-      this.insertMention(
-        member,
-        range.index - leftTokenText.length - 1,
-        leftTokenText.length + 1,
-        true
-      );
+      this.insertMention(member, start, leftTokenText.length + 1, true);
     }
   }
 
@@ -285,7 +330,9 @@ export class MentionCompletion {
               {memberResults.map((member, index) => (
                 <button
                   type="button"
-                  key={member.aci}
+                  key={
+                    isSigDemoAgentSuggestion(member) ? member.id : member.aci
+                  }
                   id={`mention-result--${member.name}`}
                   role="option button"
                   aria-selected={memberResultsIndex === index}
@@ -300,17 +347,32 @@ export class MentionCompletion {
                       : null
                   )}
                 >
-                  <Avatar
-                    avatarPlaceholderGradient={member.avatarPlaceholderGradient}
-                    avatarUrl={member.avatarUrl}
-                    badge={getPreferredBadge(member.badges)}
-                    conversationType="direct"
-                    hasAvatar={member.hasAvatar}
-                    i18n={this.options.i18n}
-                    size={AvatarSize.TWENTY_EIGHT}
-                    theme={theme}
-                    title={member.title}
-                  />
+                  {isSigDemoAgentSuggestion(member) ? (
+                    <Avatar
+                      avatarUrl={SIG_DEMO_AGENT_AVATAR}
+                      badge={undefined}
+                      conversationType="direct"
+                      hasAvatar
+                      i18n={this.options.i18n}
+                      size={AvatarSize.TWENTY_EIGHT}
+                      theme={theme}
+                      title={SIG_DEMO_AGENT_NAME}
+                    />
+                  ) : (
+                    <Avatar
+                      avatarPlaceholderGradient={
+                        member.avatarPlaceholderGradient
+                      }
+                      avatarUrl={member.avatarUrl}
+                      badge={getPreferredBadge(member.badges)}
+                      conversationType="direct"
+                      hasAvatar={member.hasAvatar}
+                      i18n={this.options.i18n}
+                      size={AvatarSize.TWENTY_EIGHT}
+                      theme={theme}
+                      title={member.title}
+                    />
+                  )}
                   <div className="module-composition-input__suggestions__title">
                     <UserText text={member.title} />
                   </div>

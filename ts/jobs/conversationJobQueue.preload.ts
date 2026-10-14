@@ -65,6 +65,8 @@ import { parseUnknown } from '../util/schemas.std.ts';
 import { challengeHandler } from '../services/challengeHandler.preload.ts';
 import { sendPinMessage } from './helpers/sendPinMessage.preload.ts';
 import { sendUnpinMessage } from './helpers/sendUnpinMessage.preload.ts';
+import { sendSigDemoAgentResponse } from './helpers/sendSigDemoAgentResponse.preload.ts';
+import { sigDemoAgentFrameSchema } from '../util/sigDemoAgent.std.ts';
 
 const globalLogger = createLogger('conversationJobQueue');
 
@@ -91,6 +93,7 @@ export const conversationQueueJobEnum = z.enum([
   'Story',
   'Receipts',
   'UnpinMessage',
+  'SigDemoAgentResponse',
 ]);
 type ConversationQueueJobEnum = z.infer<typeof conversationQueueJobEnum>;
 
@@ -177,6 +180,17 @@ const normalMessageSendJobDataSchema = z.object({
 });
 export type NormalMessageSendJobData = z.infer<
   typeof normalMessageSendJobDataSchema
+>;
+
+const sigDemoAgentResponseJobDataSchema = z.object({
+  type: z.literal(conversationQueueJobEnum.enum.SigDemoAgentResponse),
+  conversationId: z.string(),
+  frame: sigDemoAgentFrameSchema,
+  transportTimestamp: z.number().int().positive(),
+  revision: z.number().optional(),
+});
+export type SigDemoAgentResponseJobData = z.infer<
+  typeof sigDemoAgentResponseJobDataSchema
 >;
 
 const nullMessageJobDataSchema = z.object({
@@ -322,6 +336,7 @@ export const conversationQueueJobDataSchema = z.union([
   storyJobDataSchema,
   receiptsJobDataSchema,
   unpinMessageJobDataSchema,
+  sigDemoAgentResponseJobDataSchema,
 ]);
 export type ConversationQueueJobData = z.infer<
   typeof conversationQueueJobDataSchema
@@ -340,6 +355,9 @@ const MAX_RETRY_TIME = durations.DAY;
 const MAX_ATTEMPTS = exponentialBackoffMaxAttempts(MAX_RETRY_TIME);
 
 function shouldSendShowCaptcha(type: ConversationQueueJobEnum): boolean {
+  if (type === 'SigDemoAgentResponse') {
+    return false;
+  }
   if (type === 'CallingMessage') {
     return true;
   }
@@ -1019,6 +1037,9 @@ class ConversationJobQueue extends JobQueue<ConversationQueueJobData> {
           break;
         case jobSet.NormalMessage:
           await sendNormalMessage(conversation, jobBundle, data);
+          break;
+        case jobSet.SigDemoAgentResponse:
+          await sendSigDemoAgentResponse(conversation, jobBundle, data);
           break;
         case jobSet.NullMessage:
           await sendNullMessage(conversation, jobBundle, data);

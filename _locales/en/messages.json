@@ -12136,5 +12136,13 @@
   "icu:WhatsNew__8.30--1": {
     "messageformat": "We also added a convenient shortcut to open your system settings on Windows if you try to join a video call and Signal doesn't have permission to access the camera. Now it's easier to see what you need to do so that people can see you.",
     "description": "(Deleted 2026/10/07)  Release notes for 8.30"
+  },
+  "icu:SigDemoAgent--streaming": {
+    "messageformat": "Sig is responding…",
+    "description": "Status while the virtual Sig chat assistant streams a reply"
+  },
+  "icu:SigDemoAgent--error": {
+    "messageformat": "Sig could not finish this reply.",
+    "description": "Status when the virtual Sig chat assistant fails to finish a reply"
   }
 }

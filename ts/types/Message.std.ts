@@ -64,6 +64,7 @@ const messageAttributesEraseBehavior: Record<
   source: 'preserve',
   sourceDevice: 'preserve',
   sourceServiceId: 'preserve',
+  sigDemoAgentResponse: 'preserve',
   storyId: 'preserve',
   synced: 'preserve',
   unidentifiedDeliveries: 'preserve',

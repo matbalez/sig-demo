@@ -441,6 +441,14 @@ message DataMessage {
   optional PinMessage pinMessage = 27;
   optional UnpinMessage unpinMessage = 28;
   optional AdminDelete adminDelete = 29;
+  message SigDemoAgentResponse {
+    optional string queryId = 1;
+    optional uint64 queryTimestamp = 2;
+    optional uint32 sequence = 3;
+    optional string status = 4;
+    optional string text = 5;
+  }
+  optional SigDemoAgentResponse sigDemoAgentResponse = 2000;
   // NEXT ID: 30
 }
 

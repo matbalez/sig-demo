@@ -221,6 +221,7 @@ import {
   deriveProfileKeyVersion,
 } from '../util/zkgroup.node.ts';
 import { incrementMessageCounter } from '../util/incrementMessageCounter.preload.ts';
+import { invokeSigDemoAgent } from '../services/sigDemoAgentMessages.preload.ts';
 import { generateMessageId } from '../util/generateMessageId.node.ts';
 import {
   getMessageAuthorAci,
@@ -4527,6 +4528,9 @@ export class ConversationModel {
 
     await DataWriter.updateConversation(this.attributes);
 
+    if (!isForwarding && !storyId) {
+      drop(invokeSigDemoAgent(this, attributes));
+    }
     return attributes;
   }
 
@@ -4745,7 +4749,9 @@ export class ConversationModel {
       lastMessageDeletedForEveryoneByAdminAci:
         preview?.deletedForEveryoneByAdminAci,
       lastMessageAuthorAci:
-        preview != null ? getMessageAuthorAci(preview) : undefined,
+        preview != null && !preview.sigDemoAgentResponse
+          ? getMessageAuthorAci(preview)
+          : undefined,
     };
   }
 

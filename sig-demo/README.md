@@ -18,6 +18,12 @@ This is a closed test/demo for a handful of friends. One-to-one messaging and
 Groups V2 are the intended scope; calling, backups, mobile clients, and full
 Signal feature parity are outside this demo.
 
+Type `@sig` and a question in any chat to run that sender's local Sig helper.
+Everyone in the chat sees one Sig reply for that query, updated as text streams;
+the next question gets a separate reply. Responses travel through the existing
+encrypted direct or group messaging path. The helper receives only the submitted
+question, with no chat history or memory. See [Sig helper](agent/README.md).
+
 Use **Node 24.21.0**, **pnpm 11.24.0**, macOS Xcode Command Line Tools, and OpenSSL.
 From the repository root:
 
@@ -81,8 +87,14 @@ setup can resume with the same invitation and keys.
 After generating current assets, package a local macOS app:
 
 ```sh
+sh sig-demo/agent/build.sh
 pnpm run demo:package --config .sig-demo/client.json --arch arm64
 ```
+
+The local helper also needs the approved demo credential in ignored
+`.sig-demo/agent.env`; the packager accepts another private credential file with
+`--agent-key-file`. The packaged helper gets that demo credential from an Electron
+resource, and each tester runs the helper on their own Mac.
 
 Use `--arch x64` for Intel Macs. Share the resulting
 `release/sig-demo-macos-arm64.zip` or `release/sig-demo-macos-x64.zip` and one
@@ -90,8 +102,9 @@ invitation with each tester. The helper builds and verifies the ad-hoc signed
 app in a temporary directory outside cloud-synced folders, then creates the ZIP.
 It also leaves a review copy at `release/mac-arm64/sig demo.app` or
 `release/mac/sig demo.app`; use the ZIP or the printed signed staging path for
-installation. The bundle includes only public server settings. The helper does
-not publish or notarize the app.
+installation. Server settings in the bundle are public; invitations and server
+private keys stay separate. The bundle also carries the approved demo agent
+credential. The helper does not publish or notarize the app.
 
 Implementation details are in [client account creation](CLIENT-PLAN.md) and
 [private backend](server/README.md).

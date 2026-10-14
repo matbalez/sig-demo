@@ -80,6 +80,7 @@ import type { ServiceIdString } from '../types/ServiceId.std.ts';
 import { getCachedSubscriptionConfiguration } from '../util/subscriptionConfiguration.preload.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
 import { canConversationBeUnarchived } from '../util/canConversationBeUnarchived.preload.ts';
+import { applySigDemoAgentResponse } from '../services/sigDemoAgentMessages.preload.ts';
 
 const { isNumber } = lodash;
 
@@ -374,7 +375,8 @@ export async function handleDataMessage(
       type === 'incoming' &&
       message.get('unidentifiedDeliveryReceived') &&
       !hasErrors(message.attributes) &&
-      conversation.getAccepted()
+      conversation.getAccepted() &&
+      !initialMessage.sigDemoAgentResponse
     ) {
       // Note: We both queue and batch because we want to wait until we are done
       //   processing incoming messages to start sending outgoing delivery receipts.
@@ -407,6 +409,23 @@ export async function handleDataMessage(
     }
 
     const { storyContext } = initialMessage;
+    if (
+      initialMessage.sigDemoAgentResponse &&
+      window.SignalContext.config.sigDemoEnabled
+    ) {
+      strictAssert(
+        isAciString(sourceServiceId),
+        'Sig response must have its actual encrypted sender'
+      );
+      await applySigDemoAgentResponse(
+        conversation,
+        sourceServiceId,
+        initialMessage.sigDemoAgentResponse,
+        message
+      );
+      confirm();
+      return;
+    }
     let storyContextLogId = 'no storyContext';
     if (storyContext) {
       storyContextLogId =

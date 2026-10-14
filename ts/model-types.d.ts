@@ -40,6 +40,7 @@ import type { MIMEType } from './types/MIME.std.ts';
 import type { DurationInSeconds } from './util/durations/index.std.ts';
 import type { AnyPaymentEvent } from './types/Payment.std.ts';
 import type { PollMessageAttribute } from './types/Polls.dom.ts';
+import type { SigDemoAgentResponse } from './util/sigDemoAgent.std.ts';
 
 import AccessRequiredEnum = Proto.AccessControl.AccessRequired;
 import MemberRoleEnum = Proto.Member.Role;
@@ -188,6 +189,7 @@ type MessageType =
 //   consider adding a database column as well and updating `MESSAGE_COLUMNS`
 //   in `ts/sql/Server.ts`
 export type MessageAttributesType = {
+  sigDemoAgentResponse?: SigDemoAgentResponse;
   bodyAttachment?: AttachmentType;
   bodyRanges?: ReadonlyArray<RawBodyRange>;
   callId?: string;

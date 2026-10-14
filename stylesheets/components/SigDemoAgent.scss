@@ -1,0 +1,36 @@
+// Copyright 2026 sig demo contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+.sig-demo-agent-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-block-start: 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.sig-demo-agent-status__dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: #e92a85;
+  animation: sig-demo-agent-pulse 1.2s ease-in-out infinite;
+}
+
+.sig-demo-agent-status--error {
+  color: #c92668;
+  opacity: 1;
+}
+
+@keyframes sig-demo-agent-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sig-demo-agent-status__dot {
+    animation: none;
+  }
+}

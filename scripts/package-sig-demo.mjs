@@ -3,6 +3,8 @@
 
 import {
   existsSync,
+  copyFileSync,
+  lstatSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -18,18 +20,22 @@ const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64|x64]\nBuilds a local macOS .app with public private-server settings; no publishing or notarization.'
+    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64|x64] [--agent-key-file FILE]\nBuilds sig demo with its Rust chat helper and approved burner credential; no publishing or notarization.'
   );
   process.exit(0);
 }
 let configPath = resolve(root, '.sig-demo/client.json');
 let arch = process.arch;
+let agentKeyPath = resolve(root, '.sig-demo/agent.env');
 for (let index = 0; index < args.length; index += 1) {
   if (args[index] === '--config' && args[index + 1]) {
     configPath = resolve(args[index + 1]);
     index += 1;
   } else if (args[index] === '--arch' && args[index + 1]) {
     arch = args[index + 1];
+    index += 1;
+  } else if (args[index] === '--agent-key-file' && args[index + 1]) {
+    agentKeyPath = resolve(args[index + 1]);
     index += 1;
   } else {
     throw new Error(`Unknown or incomplete argument: ${args[index]}`);
@@ -59,9 +65,78 @@ if (
   );
 }
 const builderPath = resolve(root, 'node_modules/electron-builder/cli.js');
+const agentBinaryPath = resolve(
+  root,
+  'sig-demo/agent/target/release/sig-demo-agent'
+);
+if (!existsSync(agentBinaryPath)) {
+  throw new Error('Build the Sig helper first: sh sig-demo/agent/build.sh');
+}
+if (
+  !existsSync(agentKeyPath) ||
+  !lstatSync(agentKeyPath).isFile() ||
+  lstatSync(agentKeyPath).isSymbolicLink()
+) {
+  throw new Error('The approved Sig burner credential file is missing.');
+}
+// Keep the credential out of node-config, command arguments, and build logs.
+const keyMatch = readFileSync(agentKeyPath, 'utf8').match(
+  /^\s*(?:export\s+)?OPENAI_API_KEY\s*=\s*(.*?)\s*$/m
+);
+let apiKey = keyMatch?.[1] ?? '';
+if (
+  (apiKey.startsWith('"') && apiKey.endsWith('"')) ||
+  (apiKey.startsWith("'") && apiKey.endsWith("'"))
+) {
+  apiKey = apiKey.slice(1, -1);
+}
+if (!apiKey.startsWith('sk-') || /\s/.test(apiKey)) {
+  throw new Error('The approved Sig burner credential file is unusable.');
+}
+const agentArchitecture = spawnSync(
+  '/usr/bin/lipo',
+  ['-archs', agentBinaryPath],
+  {
+    encoding: 'utf8',
+  }
+);
+if (
+  agentArchitecture.error ||
+  agentArchitecture.status !== 0 ||
+  !agentArchitecture.stdout.trim().split(/\s+/).includes(arch)
+) {
+  throw new Error(
+    'The Sig helper architecture does not match this Mac package.'
+  );
+}
 // Build outside cloud-synced Documents folders, whose File Provider can recreate
 // Finder metadata immediately after xattr cleanup and invalidate verification.
 const buildRoot = mkdtempSync(join(tmpdir(), 'sig-demo-build-'));
+const agentResources = resolve(buildRoot, 'sig-demo-agent');
+mkdirSync(agentResources, { mode: 0o700 });
+copyFileSync(agentBinaryPath, resolve(agentResources, 'sig-demo-agent'));
+writeFileSync(
+  resolve(agentResources, 'runtime.json'),
+  `${JSON.stringify({ apiKey, model: 'gpt-6-luna' })}\n`,
+  { mode: 0o600 }
+);
+const builderConfigPath = resolve(buildRoot, 'builder-config.json');
+// A supplied config file replaces package.json's build section. Copy every
+// public build setting so the demo identity, icon, file list, and fuses survive.
+const packageBuild = JSON.parse(
+  readFileSync(resolve(root, 'package.json'), 'utf8')
+).build;
+writeFileSync(
+  builderConfigPath,
+  `${JSON.stringify({
+    ...packageBuild,
+    directories: { ...packageBuild.directories, output: buildRoot },
+    extraResources: [
+      ...(packageBuild.extraResources ?? []),
+      { from: agentResources, to: 'sig-demo-agent' },
+    ],
+  })}\n`
+);
 let completed = false;
 writeFileSync(
   bakedPath,
@@ -86,7 +161,7 @@ try {
       '--dir',
       '--publish',
       'never',
-      `--config.directories.output=${buildRoot}`,
+      `--config=${builderConfigPath}`,
     ],
     { cwd: root, env, stdio: 'inherit' }
   );
