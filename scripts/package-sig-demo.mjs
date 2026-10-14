@@ -15,12 +15,13 @@ import {
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 
 const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64|x64] [--agent-key-file FILE]\nBuilds sig demo with its Rust chat helper and approved burner credential; no publishing or notarization.'
+    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE]\nBuilds sig demo with its Rust chat helper, mesh-llm sidecar, and approved burner credential; no publishing or notarization.'
   );
   process.exit(0);
 }
@@ -41,9 +42,36 @@ for (let index = 0; index < args.length; index += 1) {
     throw new Error(`Unknown or incomplete argument: ${args[index]}`);
   }
 }
-if (process.platform !== 'darwin' || !['arm64', 'x64'].includes(arch)) {
-  throw new Error('This initial package script targets macOS arm64 or x64.');
+if (process.platform !== 'darwin' || arch !== 'arm64') {
+  throw new Error(
+    'The bundled mesh-llm release currently targets macOS arm64.'
+  );
 }
+const meshRelease = JSON.parse(
+  readFileSync(resolve(root, 'sig-demo/mesh/release.json'), 'utf8')
+);
+const meshResources = resolve(
+  root,
+  '.sig-demo/mesh',
+  `v${meshRelease.version}`,
+  'mesh-bundle'
+);
+if (!existsSync(resolve(meshResources, 'mesh-llm'))) {
+  throw new Error(
+    'Fetch the mesh sidecar first: node scripts/fetch-sig-demo-mesh.mjs'
+  );
+}
+function assertOfficialMeshHost(path) {
+  const checksum = createHash('sha256')
+    .update(readFileSync(path))
+    .digest('hex');
+  if (checksum !== meshRelease.hostSha256) {
+    throw new Error(
+      'The mesh-llm host must retain its official release bytes and attestation.'
+    );
+  }
+}
+assertOfficialMeshHost(resolve(meshResources, 'mesh-llm'));
 const config = JSON.parse(readFileSync(configPath, 'utf8'));
 // Share the runtime's fail-closed policy when baking the private server config.
 const { assertSigDemoNetworkConfig } =
@@ -134,6 +162,11 @@ writeFileSync(
     extraResources: [
       ...(packageBuild.extraResources ?? []),
       { from: agentResources, to: 'sig-demo-agent' },
+      { from: meshResources, to: 'sig-demo-mesh' },
+      {
+        from: resolve(root, 'sig-demo/mesh/LICENSE'),
+        to: 'sig-demo-mesh/LICENSE',
+      },
     ],
   })}\n`
 );
@@ -210,6 +243,9 @@ try {
   if (verification.status !== 0) {
     throw new Error('Built sig demo code signature verification failed.');
   }
+  assertOfficialMeshHost(
+    resolve(app, 'Contents/Resources/sig-demo-mesh/mesh-llm')
+  );
   const release = resolve(root, 'release');
   mkdirSync(release, { recursive: true });
   const zip = resolve(release, `sig-demo-macos-${arch}.zip`);

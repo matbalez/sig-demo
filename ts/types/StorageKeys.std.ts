@@ -32,6 +32,7 @@ import type { Emoji } from '../axo/emoji.std.ts';
 import type { PartialRegistrationType } from './StandaloneRegistration.std.ts';
 import type { RegistrationQueueJobState } from '../jobs/registrationJobQueue.preload.ts';
 import type { SigDemoRegistrationDraft } from '../util/sigDemoRegistrationDraft.node.ts';
+import type { SigDemoInferenceProviderType } from './SigDemoAgent.std.ts';
 
 export type AutoDownloadAttachmentType = {
   photos: boolean;
@@ -77,6 +78,7 @@ export type BlockedNumber = {
 
 export type StorageAccessType = {
   sigDemoRegistrationDraft: SigDemoRegistrationDraft;
+  sigDemoInferenceProvider: SigDemoInferenceProviderType;
   'always-relay-calls': boolean;
   'audio-notification': boolean;
   'auto-download-update': boolean;
@@ -379,6 +381,7 @@ export type StorageAccessType = {
 
 export const STORAGE_KEYS_TO_PRESERVE_AFTER_UNLINK = [
   // UI & user-setting-related keys
+  'sigDemoInferenceProvider',
   'always-relay-calls',
   'audio-notification',
   'audioMessage',

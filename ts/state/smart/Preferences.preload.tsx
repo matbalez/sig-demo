@@ -136,6 +136,7 @@ import { pinReminderService } from '../../services/pinReminder.preload.ts';
 import { useGlobalModalActions } from '../ducks/globalModals.preload.ts';
 import { maybeUpdateRegistrationLock } from '../../util/registrationLock.preload.ts';
 import { disableSignalPin } from '../../util/disableSignalPin.preload.ts';
+import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../../types/SigDemoAgent.std.ts';
 
 const RESETTABLE_GLOBAL_NOTIFICATION_ITEMS = [
   ...Object.values(NOTIFY_WHILE_MUTED_FIELDS),
@@ -687,6 +688,12 @@ export function SmartPreferences(): JSX.Element | null {
     return [value, setter];
   }
 
+  const [sigDemoInferenceProvider, onSigDemoInferenceProviderChange] =
+    createItemsAccess(
+      'sigDemoInferenceProvider',
+      SIG_DEMO_DEFAULT_INFERENCE_PROVIDER
+    );
+
   const [hasLinkPreviews, onLinkPreviewsChange] = createItemsAccess(
     'linkPreviews',
     false,
@@ -1135,6 +1142,7 @@ export function SmartPreferences(): JSX.Element | null {
         isSyncSupported={isSyncSupported}
         isSystemTraySupported={isSystemTraySupported}
         isInternalUser={isInternalUser}
+        isSigDemo={window.SignalContext.config.sigDemoEnabled}
         lastLocalBackup={lastLocalBackup}
         lastSyncTime={lastSyncTime}
         localBackupFolder={localBackupFolder}
@@ -1191,6 +1199,7 @@ export function SmartPreferences(): JSX.Element | null {
         onSpellCheckChange={onSpellCheckChange}
         onTextFormattingChange={onTextFormattingChange}
         onThemeChange={onThemeChange}
+        onSigDemoInferenceProviderChange={onSigDemoInferenceProviderChange}
         onToggleNavTabsCollapse={toggleNavTabsCollapse}
         onTypingIndicatorsChange={onTypingIndicatorsChange}
         onUniversalExpireTimerChange={onUniversalExpireTimerChange}
@@ -1244,6 +1253,7 @@ export function SmartPreferences(): JSX.Element | null {
         startPlaintextExport={startPlaintextExport}
         theme={theme}
         themeSetting={themeSetting}
+        sigDemoInferenceProvider={sigDemoInferenceProvider}
         universalExpireTimer={universalExpireTimer}
         unreadCountBadgeType={unreadCountBadgeType}
         validateBackup={validateBackup}

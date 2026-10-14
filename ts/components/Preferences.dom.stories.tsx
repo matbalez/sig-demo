@@ -507,6 +507,7 @@ export default {
     isSyncSupported: true,
     isSystemTraySupported: true,
     isInternalUser: false,
+    isSigDemo: false,
     isContentProtectionSupported: true,
     isContentProtectionNeeded: true,
     isMinimizeToAndStartInSystemTraySupported: true,
@@ -535,6 +536,7 @@ export default {
     sentMediaQualitySetting: 'standard',
     shouldShowUpdateDialog: false,
     themeSetting: 'system',
+    sigDemoInferenceProvider: 'mesh-llm',
     theme: ThemeType.light,
     universalExpireTimer: DurationInSeconds.HOUR,
     unreadCountBadgeType: 'unread-messages',
@@ -641,6 +643,9 @@ export default {
     onStartUpdate: action('onStartUpdate'),
     onTextFormattingChange: action('onTextFormattingChange'),
     onThemeChange: action('onThemeChange'),
+    onSigDemoInferenceProviderChange: action(
+      'onSigDemoInferenceProviderChange'
+    ),
     onToggleNavTabsCollapse: action('onToggleNavTabsCollapse'),
     onTypingIndicatorsChange: action('onTypingIndicatorsChange'),
     onUniversalExpireTimerChange: action('onUniversalExpireTimerChange'),

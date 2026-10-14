@@ -7,16 +7,25 @@ import type {
   SigDemoAgentEventType,
   SigDemoAgentRunRequestType,
 } from '../types/SigDemoAgent.std.ts';
+import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../types/SigDemoAgent.std.ts';
+import { itemStorage } from '../textsecure/Storage.preload.ts';
 import { drop } from '../util/drop.std.ts';
 
 /** Only a locally submitted query calls this; received messages never run GDK. */
 export async function streamSigDemoAgent(
-  request: SigDemoAgentRunRequestType,
+  request: Omit<SigDemoAgentRunRequestType, 'provider'>,
   onText: (delta: string) => void
 ): Promise<void> {
   if (!window.SignalContext.config.sigDemoEnabled) {
     throw new Error('Sig is available in the private demo.');
   }
+  const agentRequest: SigDemoAgentRunRequestType = {
+    ...request,
+    provider: itemStorage.get(
+      'sigDemoInferenceProvider',
+      SIG_DEMO_DEFAULT_INFERENCE_PROVIDER
+    ),
+  };
   return new Promise((resolve, reject) => {
     let finished = false;
     const cleanup = () => {
@@ -59,7 +68,7 @@ export async function streamSigDemoAgent(
     const startRequest = async () => {
       try {
         const result: { ok: boolean; error?: string } =
-          await ipcRenderer.invoke('sig-demo-agent:start', request);
+          await ipcRenderer.invoke('sig-demo-agent:start', agentRequest);
         if (!result.ok) {
           finish(new Error(result.error ?? 'Sig could not start.'));
         }

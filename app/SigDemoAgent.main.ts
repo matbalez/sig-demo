@@ -13,12 +13,16 @@ import { z } from 'zod';
 import {
   SIG_DEMO_AGENT_MODEL,
   type SigDemoAgentEventType,
+  type SigDemoInferenceProviderType,
 } from '../ts/types/SigDemoAgent.std.ts';
 import { getAppRootDir } from '../ts/util/appRootDir.main.ts';
+import { SigDemoMesh } from './SigDemoMesh.main.ts';
+import { drop } from '../ts/util/drop.std.ts';
 
 const requestSchema = z.object({
   requestId: z.string().uuid(),
   prompt: z.string().trim().min(1).max(65_536),
+  provider: z.enum(['mesh-llm', 'chatgpt']),
 });
 const chunkSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
@@ -30,14 +34,21 @@ const runtimeSchema = z.object({
   model: z.string().min(1).default(SIG_DEMO_AGENT_MODEL),
 });
 
-function loadRuntime() {
+function loadRuntime(provider: SigDemoInferenceProviderType) {
   const root = getAppRootDir();
+  const binary = app.isPackaged
+    ? join(process.resourcesPath, 'sig-demo-agent/sig-demo-agent')
+    : join(root, 'sig-demo/agent/target/release/sig-demo-agent');
+  // Mesh uses no OpenAI credential, including when ChatGPT's file is absent.
+  if (provider === 'mesh-llm') {
+    return { binary, model: SIG_DEMO_AGENT_MODEL, apiKey: undefined };
+  }
   if (app.isPackaged) {
     const directory = join(process.resourcesPath, 'sig-demo-agent');
     const runtime = runtimeSchema.parse(
       JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'))
     );
-    return { ...runtime, binary: join(directory, 'sig-demo-agent') };
+    return { ...runtime, binary };
   }
   // Keep the key outside NODE_CONFIG, whose values upstream logs at startup.
   const contents = readFileSync(join(root, '.sig-demo/agent.env'), 'utf8');
@@ -51,7 +62,7 @@ function loadRuntime() {
   });
   return {
     ...runtime,
-    binary: join(root, 'sig-demo/agent/target/release/sig-demo-agent'),
+    binary,
   };
 }
 
@@ -60,31 +71,71 @@ export function setupSigDemoAgent(
   getMainWebContents: () => WebContents | undefined
 ): void {
   const children = new Map<string, ChildProcessWithoutNullStreams>();
-  ipcMain.handle('sig-demo-agent:start', (event, value: unknown) => {
+  const starting = new Set<string>();
+  const mesh = new SigDemoMesh();
+  // Prepare discovery while the messenger opens, so the first query is ready.
+  const startMesh = async () => {
+    try {
+      await app.whenReady();
+      await mesh.start();
+    } catch {
+      // Query-time errors explain unavailability without logging network details.
+    }
+  };
+  drop(startMesh());
+  ipcMain.handle('sig-demo-agent:start', async (event, value: unknown) => {
     const parsed = requestSchema.safeParse(value);
     if (
       !parsed.success ||
       event.sender !== getMainWebContents() ||
       event.senderFrame !== event.sender.mainFrame ||
-      children.has(parsed.data.requestId)
+      children.has(parsed.data.requestId) ||
+      starting.has(parsed.data.requestId)
     ) {
       return { ok: false, error: 'Sig could not start this request.' };
     }
-    const { requestId, prompt } = parsed.data;
+    const { requestId, prompt, provider } = parsed.data;
     let runtime: ReturnType<typeof loadRuntime>;
+    let inference: Awaited<ReturnType<SigDemoMesh['getInference']>> | undefined;
+    starting.add(requestId);
     try {
-      runtime = loadRuntime();
+      runtime = loadRuntime(provider);
       if (!existsSync(runtime.binary)) {
+        starting.delete(requestId);
         return {
           ok: false,
           error: 'The local Sig agent is missing from this build.',
         };
       }
+      if (provider === 'mesh-llm') {
+        inference = await mesh.getInference();
+      }
     } catch {
-      return { ok: false, error: 'Sig is not configured in this build.' };
+      starting.delete(requestId);
+      return {
+        ok: false,
+        error:
+          provider === 'mesh-llm'
+            ? 'No public mesh node is available. Try again, or choose ChatGPT under General → Inference.'
+            : 'Sig is not configured in this build.',
+      };
+    }
+    if (
+      !starting.has(requestId) ||
+      event.sender.isDestroyed() ||
+      event.sender !== getMainWebContents()
+    ) {
+      starting.delete(requestId);
+      return { ok: false, error: 'Sig stopped before starting this request.' };
+    }
+    starting.delete(requestId);
+    const env = { ...process.env };
+    delete env.OPENAI_API_KEY;
+    if (provider === 'chatgpt') {
+      env.OPENAI_API_KEY = runtime.apiKey;
     }
     const child = spawn(runtime.binary, [], {
-      env: { ...process.env, OPENAI_API_KEY: runtime.apiKey },
+      env,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     children.set(requestId, child);
@@ -138,7 +189,13 @@ export function setupSigDemoAgent(
       lines.close();
       finish('Sig stopped before completing its response.');
     });
-    child.stdin.end(`${JSON.stringify({ prompt, model: runtime.model })}\n`);
+    child.stdin.end(
+      `${JSON.stringify({
+        prompt,
+        provider,
+        ...(inference ?? { model: runtime.model }),
+      })}\n`
+    );
     return { ok: true };
   });
   ipcMain.on('sig-demo-agent:cancel', (event, requestId: unknown) => {
@@ -146,10 +203,13 @@ export function setupSigDemoAgent(
       event.sender === getMainWebContents() &&
       typeof requestId === 'string'
     ) {
+      starting.delete(requestId);
       children.get(requestId)?.kill();
     }
   });
   app.on('before-quit', () => {
+    starting.clear();
+    mesh.stop();
     for (const child of children.values()) {
       child.kill();
     }

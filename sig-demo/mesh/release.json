@@ -1,0 +1,11 @@
+{
+  "version": "0.78.1",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "asset": "mesh-llm-v0.78.1-aarch64-apple-darwin.tar.gz",
+  "url": "https://github.com/Mesh-LLM/mesh-llm/releases/download/v0.78.1/mesh-llm-v0.78.1-aarch64-apple-darwin.tar.gz",
+  "sha256": "a00fd8c7c3d4cf5a543c83b2034dcf7a7cfe02198f9056faa09305d774ae5001",
+  "hostSha256": "48f7af521cc96fcdebe172d98c5fb03bda94d8872fe362d9b078106cfbd3178c",
+  "source": "https://github.com/Mesh-LLM/mesh-llm/tree/v0.78.1",
+  "license": "Apache-2.0"
+}

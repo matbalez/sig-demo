@@ -64,6 +64,7 @@ import type {
 } from '../util/notifyWhileMuted.std.ts';
 import { getNotifyWhileMutedSummary } from '../util/notifyWhileMuted.std.ts';
 import type { ThemeSettingType } from '../util/theme.std.ts';
+import type { SigDemoInferenceProviderType } from '../types/SigDemoAgent.std.ts';
 import type { AnyToast } from '../types/Toast.dom.tsx';
 import { ToastType } from '../types/Toast.dom.tsx';
 import type { ConversationType } from '../state/ducks/conversations.preload.ts';
@@ -198,6 +199,7 @@ export type PropsDataType = {
   selectedSpeaker?: AudioDevice;
   sentMediaQualitySetting: SentMediaQualitySettingType;
   themeSetting: ThemeSettingType | undefined;
+  sigDemoInferenceProvider: SigDemoInferenceProviderType;
   universalExpireTimer: DurationInSeconds;
   unreadCountBadgeType: UnreadCountBadgeType;
   whoCanFindMe: PhoneNumberDiscoverability;
@@ -234,6 +236,7 @@ export type PropsDataType = {
   isSystemTraySupported: boolean;
   isMinimizeToAndStartInSystemTraySupported: boolean;
   isInternalUser: boolean;
+  isSigDemo: boolean;
 
   // Devices
   availableCameras: Array<
@@ -388,6 +391,7 @@ type PropsFunctionType = {
   onSpellCheckChange: CheckboxChangeHandlerType;
   onTextFormattingChange: CheckboxChangeHandlerType;
   onThemeChange: SelectChangeHandlerType<ThemeType>;
+  onSigDemoInferenceProviderChange: SelectChangeHandlerType<SigDemoInferenceProviderType>;
   onToggleNavTabsCollapse: (navTabsCollapsed: boolean) => void;
   onTypingIndicatorsChange: CheckboxChangeHandlerType;
   onUniversalExpireTimerChange: SelectChangeHandlerType<number>;
@@ -543,6 +547,7 @@ export function Preferences({
   isSystemTraySupported,
   isMinimizeToAndStartInSystemTraySupported,
   isInternalUser,
+  isSigDemo,
   lastLocalBackup,
   lastSyncTime,
   localBackupFolder,
@@ -593,6 +598,7 @@ export function Preferences({
   onSpellCheckChange,
   onTextFormattingChange,
   onThemeChange,
+  onSigDemoInferenceProviderChange,
   onToggleNavTabsCollapse,
   onTypingIndicatorsChange,
   onUniversalExpireTimerChange,
@@ -641,6 +647,7 @@ export function Preferences({
   localeOverride,
   theme,
   themeSetting,
+  sigDemoInferenceProvider,
   universalExpireTimer,
   unreadCountBadgeType,
   validateBackup,
@@ -1018,6 +1025,26 @@ export function Preferences({
             value={deviceName}
           />
         </List>
+        {isSigDemo && (
+          <List
+            footerDescription={i18n('icu:SigDemoAgent--inference-description')}
+          >
+            <AxoSelectItem.Root
+              label={i18n('icu:SigDemoAgent--inference')}
+              value={sigDemoInferenceProvider}
+              placeholder=""
+              onValueChange={value => {
+                if (value === 'mesh-llm' || value === 'chatgpt') {
+                  onSigDemoInferenceProviderChange(value);
+                }
+              }}
+              options={[
+                { label: 'mesh-llm', value: 'mesh-llm' },
+                { label: 'ChatGPT', value: 'chatgpt' },
+              ]}
+            />
+          </List>
+        )}
         {weArePrimaryDevice && (
           <List
             label={i18n('icu:Preferences--signal-pin')}

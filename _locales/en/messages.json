@@ -12144,5 +12144,13 @@
   "icu:SigDemoAgent--error": {
     "messageformat": "Sig could not finish this reply.",
     "description": "Status when the virtual Sig chat assistant fails to finish a reply"
+  },
+  "icu:SigDemoAgent--inference": {
+    "messageformat": "Inference",
+    "description": "General setting to choose the provider for the Sig chat assistant"
+  },
+  "icu:SigDemoAgent--inference-description": {
+    "messageformat": "Choose what powers Sig on this Mac. Only questions sent with @sig are shared with the selected provider.",
+    "description": "Description of the per-device inference setting for Sig"
   }
 }
