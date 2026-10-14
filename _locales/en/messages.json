@@ -12141,10 +12141,6 @@
     "messageformat": "Sig is responding…",
     "description": "Status while the virtual Sig chat assistant streams a reply"
   },
-  "icu:SigDemoAgent--connecting": {
-    "messageformat": "Connecting to mesh…",
-    "description": "Status while the Sig chat assistant connects to an inference node"
-  },
   "icu:SigDemoAgent--searching": {
     "messageformat": "Searching the web…",
     "description": "Status while the Sig chat assistant searches the web"

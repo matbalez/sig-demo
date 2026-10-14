@@ -21,7 +21,10 @@ import {
   type SigDemoInferenceProviderType,
 } from '../ts/types/SigDemoAgent.std.ts';
 import { getAppRootDir } from '../ts/util/appRootDir.main.ts';
-import { SigDemoMesh } from './SigDemoMesh.main.ts';
+import {
+  SigDemoMesh,
+  type SigDemoMeshInferenceType,
+} from './SigDemoMesh.main.ts';
 import { drop } from '../ts/util/drop.std.ts';
 import { createLogger } from '../ts/logging/log.std.ts';
 
@@ -73,6 +76,19 @@ const chunkSchema = z.discriminatedUnion('type', [
     type: z.literal('status'),
     status: z.enum(['searching', 'responding']),
   }),
+  z.object({
+    type: z.literal('timing'),
+    phase: z.enum([
+      'helper-started',
+      'native-planning',
+      'json-planning',
+      'search',
+      'answer-first-text',
+      'answer',
+      'warmup',
+    ]),
+    durationMs: z.number().int().nonnegative(),
+  }),
   z.object({ type: z.literal('done') }),
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
@@ -110,11 +126,15 @@ function loadBraveKey(): string | undefined {
   );
 }
 
+function agentBinary(): string {
+  return app.isPackaged
+    ? join(process.resourcesPath, 'sig-demo-agent/sig-demo-agent')
+    : join(getAppRootDir(), 'sig-demo/agent/target/release/sig-demo-agent');
+}
+
 function loadRuntime(provider: SigDemoInferenceProviderType) {
   const root = getAppRootDir();
-  const binary = app.isPackaged
-    ? join(process.resourcesPath, 'sig-demo-agent/sig-demo-agent')
-    : join(root, 'sig-demo/agent/target/release/sig-demo-agent');
+  const binary = agentBinary();
   const braveApiKey = provider === 'mesh-llm' ? loadBraveKey() : undefined;
   // Mesh uses no OpenAI credential, including when ChatGPT's file is absent.
   if (provider === 'mesh-llm') {
@@ -154,13 +174,95 @@ export function setupSigDemoAgent(
   getMainWebContents: () => WebContents | undefined
 ): void {
   const children = new Map<string, ChildProcessWithoutNullStreams>();
+  const warmChildren = new Set<ChildProcessWithoutNullStreams>();
   const starting = new Set<string>();
   const mesh = new SigDemoMesh();
-  // Prepare discovery while the messenger opens, so the first query is ready.
+  const warmMeshInference = async (
+    inference: SigDemoMeshInferenceType
+  ): Promise<void> => {
+    const binary = agentBinary();
+    if (!existsSync(binary)) {
+      throw new Error('The local Sig agent is missing from this build.');
+    }
+    await new Promise<void>((resolve, reject) => {
+      // Warm only the free selected mesh route, with synthetic input and no
+      // credentials or conversation data. OpenAI is never warmed at startup.
+      const env: NodeJS.ProcessEnv = {};
+      for (const name of [
+        'PATH',
+        'HOME',
+        'USER',
+        'LOGNAME',
+        'TMPDIR',
+        'LANG',
+      ]) {
+        env[name] = process.env[name];
+      }
+      const startedAt = performance.now();
+      const child = spawn(binary, [], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      warmChildren.add(child);
+      let finished = false;
+      const finish = (ok: boolean) => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        clearTimeout(timeout);
+        warmChildren.delete(child);
+        child.kill();
+        log.info('Mesh inference warmup finished', {
+          result: ok ? 'ready' : 'unavailable',
+          totalMs: Math.round(performance.now() - startedAt),
+        });
+        if (ok) {
+          resolve();
+        } else {
+          reject(
+            new Error('The mesh inference route did not become responsive.')
+          );
+        }
+      };
+      const timeout = setTimeout(() => finish(false), 20_000);
+      const lines = createInterface({ input: child.stdout });
+      lines.on('line', line => {
+        if (finished) {
+          return;
+        }
+        try {
+          const chunk = chunkSchema.parse(JSON.parse(line));
+          if (chunk.type === 'timing') {
+            log.info('Mesh warmup phase', {
+              phase: chunk.phase,
+              durationMs: chunk.durationMs,
+              helperEventAtMs: Math.round(performance.now() - startedAt),
+            });
+          } else if (chunk.type === 'done') {
+            finish(true);
+          } else if (chunk.type === 'error') {
+            finish(false);
+          }
+        } catch {
+          finish(false);
+        }
+      });
+      child.stderr.resume();
+      child.stdin.on('error', () => finish(false));
+      child.once('error', () => finish(false));
+      child.once('close', () => {
+        lines.close();
+        finish(false);
+      });
+      child.stdin.end(
+        `${JSON.stringify({ mode: 'warmup', provider: 'mesh-llm', ...inference })}\n`
+      );
+    });
+  };
+  // Prepare discovery and an actual inference completion while the messenger
+  // opens. A query shares this promise instead of starting a second cold call.
   const startMesh = async () => {
     try {
       await app.whenReady();
-      await mesh.start();
+      await mesh.prepareInference(warmMeshInference);
     } catch {
       // Query-time errors explain unavailability without logging network details.
     }
@@ -197,8 +299,7 @@ export function setupSigDemoAgent(
         };
       }
       if (provider === 'mesh-llm') {
-        send({ requestId, type: 'status', status: 'connecting' });
-        inference = await mesh.getInference();
+        inference = await mesh.prepareInference(warmMeshInference);
       }
     } catch {
       starting.delete(requestId);
@@ -281,6 +382,13 @@ export function setupSigDemoAgent(
           send({ requestId, type: 'text', text: chunk.text });
         } else if (chunk.type === 'status') {
           send({ requestId, type: 'status', status: chunk.status });
+        } else if (chunk.type === 'timing') {
+          log.info('Inference phase', {
+            provider,
+            phase: chunk.phase,
+            durationMs: chunk.durationMs,
+            helperEventAtMs: Math.round(performance.now() - preparedAt),
+          });
         } else if (chunk.type === 'error') {
           finish(chunk.message);
         } else {
@@ -324,6 +432,9 @@ export function setupSigDemoAgent(
     starting.clear();
     mesh.stop();
     for (const child of children.values()) {
+      child.kill();
+    }
+    for (const child of warmChildren) {
       child.kill();
     }
   });

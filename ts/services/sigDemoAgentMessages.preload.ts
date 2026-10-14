@@ -251,7 +251,6 @@ export async function invokeSigDemoAgent(
         placeholder = window.SignalContext.i18n(
           (
             {
-              connecting: 'icu:SigDemoAgent--connecting',
               responding: 'icu:SigDemoAgent--streaming',
               searching: 'icu:SigDemoAgent--searching',
             } as const

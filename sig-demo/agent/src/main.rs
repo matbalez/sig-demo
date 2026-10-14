@@ -5,7 +5,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Write};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use goose_sdk::bindings::{
     declarative_provider_from_json, openai_provider, GooseError, GooseStreamErrorKind,
@@ -33,6 +33,9 @@ const MAX_HISTORY_BYTES: usize = 6000;
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Request {
+    #[serde(default)]
+    mode: RequestMode,
+    #[serde(default)]
     prompt: String,
     author: Option<String>,
     #[serde(default)]
@@ -46,6 +49,14 @@ struct Request {
     base_url: Option<String>,
     #[serde(rename = "targetNodeId")]
     target_node_id: Option<String>,
+}
+
+#[derive(Default, Deserialize, PartialEq, Debug)]
+#[serde(rename_all = "kebab-case")]
+enum RequestMode {
+    #[default]
+    Answer,
+    Warmup,
 }
 
 #[derive(Deserialize, Serialize)]
@@ -92,7 +103,17 @@ enum InferenceProvider {
 
 impl Request {
     fn validate(&self) -> Result<(), &'static str> {
-        if self.prompt.trim().is_empty() {
+        if self.mode == RequestMode::Warmup {
+            if self.provider != InferenceProvider::MeshLlm
+                || !self.prompt.is_empty()
+                || self.author.is_some()
+                || !self.history.is_empty()
+                || self.current_date.is_some()
+                || self.target_node_id.is_none()
+            {
+                return Err("Invalid mesh warmup request.");
+            }
+        } else if self.prompt.trim().is_empty() {
             return Err("Enter a message for Sig.");
         }
         if self.prompt.chars().count() > MAX_PROMPT_CHARACTERS {
@@ -222,10 +243,44 @@ fn is_mesh_base_url(base_url: &str) -> bool {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Event<'a> {
-    Text { text: &'a str },
-    Status { status: &'static str },
+    Text {
+        text: &'a str,
+    },
+    Status {
+        status: &'static str,
+    },
+    Timing {
+        phase: TimingPhase,
+        #[serde(rename = "durationMs")]
+        duration_ms: u64,
+    },
     Done,
-    Error { message: &'a str },
+    Error {
+        message: &'a str,
+    },
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum TimingPhase {
+    HelperStarted,
+    NativePlanning,
+    JsonPlanning,
+    Search,
+    AnswerFirstText,
+    Answer,
+    Warmup,
+}
+
+fn timing_event(phase: TimingPhase, started: Instant) -> Event<'static> {
+    Event::Timing {
+        phase,
+        duration_ms: u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX),
+    }
+}
+
+fn report_timing(phase: TimingPhase, started: Instant) -> Result<(), &'static str> {
+    emit(timing_event(phase, started))
 }
 
 fn emit(event: Event<'_>) -> Result<(), &'static str> {
@@ -345,6 +400,15 @@ enum SearchDecision {
     },
 }
 
+fn can_fallback_from_native_tools(error: &GooseError) -> bool {
+    matches!(
+        error,
+        GooseError::Generic { .. }
+            | GooseError::OutputTokenLimitExceeded { .. }
+            | GooseError::ProviderUnavailable { .. }
+    )
+}
+
 fn completion_text(content: &[MessageContent]) -> String {
     content
         .iter()
@@ -382,7 +446,10 @@ async fn execute_search(
         status: "searching",
     })
     .ok();
-    tool.search(&arguments).await
+    let started = Instant::now();
+    let result = tool.search(&arguments).await;
+    report_timing(TimingPhase::Search, started).ok();
+    result
 }
 
 async fn prepare_text_search(
@@ -395,6 +462,7 @@ async fn prepare_text_search(
 ) -> Result<Vec<ProviderMessage>, &'static str> {
     while count < MAX_SEARCHES {
         let messages = provider_messages_with_search(request, &results)?;
+        let started = Instant::now();
         let completion = provider
             .complete(
                 model_config(request, 256),
@@ -402,8 +470,9 @@ async fn prepare_text_search(
                 messages,
                 vec![],
             )
-            .await
-            .map_err(|error| safe_error(&error))?;
+            .await;
+        report_timing(TimingPhase::JsonPlanning, started)?;
+        let completion = completion.map_err(|error| safe_error(&error))?;
         let text = completion_text(&completion.content);
         let decision = (text.len() <= 8192)
             .then(|| serde_json::from_str::<SearchDecision>(text.trim()).ok())
@@ -448,24 +517,21 @@ async fn prepare_search(
     let mut seen = HashSet::new();
     let mut count = 0;
     for _ in 0..MAX_SEARCHES {
-        let completion = match provider
+        let started = Instant::now();
+        let completion = provider
             .complete(
                 model_config(request, 512),
                 format!("{SYSTEM}\n\n{NATIVE_SEARCH_PLAN}"),
                 messages.clone(),
                 vec![web_search_tool()],
             )
-            .await
-        {
+            .await;
+        report_timing(TimingPhase::NativePlanning, started)?;
+        let completion = match completion {
             Ok(completion) => completion,
             Err(error)
                 if request.provider == InferenceProvider::MeshLlm
-                    && matches!(
-                        error,
-                        GooseError::Generic { .. }
-                            | GooseError::OutputTokenLimitExceeded { .. }
-                            | GooseError::ProviderUnavailable { .. }
-                    ) =>
+                    && can_fallback_from_native_tools(&error) =>
             {
                 return prepare_text_search(provider, request, tool, results, seen, count).await;
             }
@@ -573,6 +639,9 @@ fn create_provider(request: &Request) -> Result<Arc<Provider>, &'static str> {
 
 async fn answer(request: Request) -> Result<(), &'static str> {
     let provider = create_provider(&request)?;
+    if request.mode == RequestMode::Warmup {
+        return warmup_with_provider(&request, &provider).await;
+    }
     // OpenAI performs its own web search inside Responses. It never reads the
     // local Brave credential or enters our local search-planning loop.
     let tool = if request.provider == InferenceProvider::MeshLlm {
@@ -581,6 +650,69 @@ async fn answer(request: Request) -> Result<(), &'static str> {
         None
     };
     answer_with_provider(&request, &provider, tool.as_ref()).await
+}
+
+async fn warmup_with_provider(
+    request: &Request,
+    provider: &Arc<Provider>,
+) -> Result<(), &'static str> {
+    // This probe has no chat context or credentials. It warms the selected model
+    // and native tool schema without reading Brave's environment or using it.
+    let messages = warmup_messages(
+        "This is a model warmup. Return exactly NO_SEARCH. Do not call a tool or search.",
+    );
+    let mut config = model_config(request, 32);
+    config.timeout_ms = Some(12_000);
+    let started = Instant::now();
+    let completion = provider
+        .complete(
+            config,
+            format!("{SYSTEM}\n\n{NATIVE_SEARCH_PLAN}"),
+            messages,
+            vec![web_search_tool()],
+        )
+        .await;
+    let completion = match completion {
+        Err(error) if can_fallback_from_native_tools(&error) => {
+            // A supported text-only model can reject function schemas. Exercise
+            // its existing JSON-planner path within this same warmup budget.
+            let remaining_ms = 15_000_u64
+                .saturating_sub(u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX));
+            if remaining_ms == 0 {
+                Err(error)
+            } else {
+                let mut config = model_config(request, 32);
+                config.timeout_ms = Some(remaining_ms.min(12_000));
+                provider.complete(
+                    config,
+                    format!("{SYSTEM}\n\n{JSON_SEARCH_PLAN}"),
+                    warmup_messages("This is a model warmup. No web search is needed. Return {\"action\":\"answer\"}; do not call a tool or search."),
+                    vec![],
+                ).await
+            }
+        }
+        completion => completion,
+    };
+    report_timing(TimingPhase::Warmup, started)?;
+    completion.map_err(|error| safe_error(&error))?;
+    // Neither probe text nor a suggested tool call is returned to chat/executed.
+    emit(Event::Done)
+}
+
+fn warmup_messages(text: &'static str) -> Vec<ProviderMessage> {
+    vec![ProviderMessage {
+        role: MessageRole::User,
+        content: vec![MessageContent::Text {
+            text: serde_json::json!({
+                "recentHistory": [],
+                "currentRequest": {
+                    "author": "Warmup",
+                    "text": text
+                }
+            })
+            .to_string(),
+        }],
+    }]
 }
 
 async fn answer_with_provider(
@@ -606,6 +738,7 @@ async fn answer_with_provider(
     emit(Event::Status {
         status: "responding",
     })?;
+    let answer_started = Instant::now();
     let stream = provider
         .stream(
             model_config(request, 2048),
@@ -623,6 +756,9 @@ async fn answer_with_provider(
     {
         match chunk {
             StreamChunk::TextChunk { text } => {
+                if !received_text && !text.trim().is_empty() {
+                    report_timing(TimingPhase::AnswerFirstText, answer_started)?;
+                }
                 received_text |= !text.trim().is_empty();
                 if !text.is_empty() {
                     emit(Event::Text { text: &text })?;
@@ -636,6 +772,7 @@ async fn answer_with_provider(
             StreamChunk::ThinkingChunk { .. } | StreamChunk::RedactedThinkingChunk { .. } => {}
         }
     }
+    report_timing(TimingPhase::Answer, answer_started)?;
     if !received_text {
         return Err("Sig returned an empty response. Try again.");
     }
@@ -644,9 +781,22 @@ async fn answer_with_provider(
 
 #[tokio::main]
 async fn main() {
+    if emit(Event::Timing {
+        phase: TimingPhase::HelperStarted,
+        duration_ms: 0,
+    })
+    .is_err()
+    {
+        return;
+    }
     let result = match read_request() {
         Ok(request) => {
-            match tokio::time::timeout(Duration::from_secs(120), answer(request)).await {
+            let timeout = if request.mode == RequestMode::Warmup {
+                15
+            } else {
+                120
+            };
+            match tokio::time::timeout(Duration::from_secs(timeout), answer(request)).await {
                 Ok(result) => result,
                 Err(_) => Err("Sig's request timed out. Try again."),
             }
@@ -784,6 +934,154 @@ mod tests {
             r#"{"action":"search","query":"SDK","endpoint":"https://example.com"}"#
         )
         .is_err());
+    }
+
+    #[test]
+    fn warmup_is_mesh_only_and_cannot_accept_chat_context() {
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "mode":"warmup", "provider":"mesh-llm", "model":"mesh-test-model",
+            "baseUrl":"http://127.0.0.1:49152/v1", "targetNodeId":"0".repeat(64)
+        }))
+        .unwrap();
+        assert!(request.validate().is_ok());
+        assert!(request.prompt.is_empty());
+        for extra in [
+            serde_json::json!({"provider":"chatgpt"}),
+            serde_json::json!({"prompt":"Private chat text"}),
+            serde_json::json!({"author":"Alice"}),
+            serde_json::json!({"history":[{"role":"user","author":"Alice","text":"Private chat history"}]}),
+            serde_json::json!({"currentDate":"2026-10-14"}),
+            serde_json::json!({"targetNodeId":null}),
+        ] {
+            let mut value = serde_json::json!({
+                "mode":"warmup", "provider":"mesh-llm", "model":"mesh-test-model",
+                "baseUrl":"http://127.0.0.1:49152/v1", "targetNodeId":"0".repeat(64)
+            });
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            assert!(serde_json::from_value::<Request>(value)
+                .unwrap()
+                .validate()
+                .is_err());
+        }
+        let missing_question: Request = serde_json::from_str(r#"{"provider":"chatgpt"}"#).unwrap();
+        assert!(missing_question.validate().is_err());
+    }
+
+    #[test]
+    fn timing_events_contain_only_a_static_phase_and_elapsed_milliseconds() {
+        let value = serde_json::to_value(timing_event(TimingPhase::NativePlanning, Instant::now()))
+            .unwrap();
+        assert_eq!(value["type"], "timing");
+        assert_eq!(value["phase"], "native-planning");
+        assert!(value["durationMs"].is_u64());
+        assert_eq!(value.as_object().unwrap().len(), 3);
+    }
+
+    #[tokio::test]
+    async fn mesh_warmup_uses_constant_input_and_never_executes_a_suggested_search() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "mode":"warmup", "provider":"mesh-llm", "model":"mesh-test-model",
+            "baseUrl":format!("http://127.0.0.1:{}/v1", listener.local_addr().unwrap().port()),
+            "targetNodeId":"0".repeat(64)
+        }))
+        .unwrap();
+        request.validate().unwrap();
+        let provider = create_provider(&request).unwrap();
+        let server = thread::spawn(move || {
+            let (mut connection, _) = listener.accept().unwrap();
+            let (headers, payload) = read_mock_request(&mut connection);
+            assert!(headers.starts_with("POST /v1/chat/completions HTTP/1.1"));
+            assert!(!headers.to_ascii_lowercase().contains("authorization:"));
+            assert!(headers.contains(&"0".repeat(64)));
+            assert_eq!(payload["max_tokens"], 32);
+            assert_eq!(payload["chat_template_kwargs"]["enable_thinking"], false);
+            assert_eq!(payload["tools"][0]["function"]["name"], "brave_web_search");
+            assert!(payload["messages"][0]["content"]
+                .as_str()
+                .unwrap()
+                .contains(NATIVE_SEARCH_PLAN));
+            let context: serde_json::Value =
+                serde_json::from_str(payload["messages"][1]["content"].as_str().unwrap()).unwrap();
+            assert_eq!(context["recentHistory"], serde_json::json!([]));
+            assert_eq!(context["currentRequest"]["author"], "Warmup");
+            assert!(context["currentRequest"]["text"]
+                .as_str()
+                .unwrap()
+                .contains("Return exactly NO_SEARCH"));
+            // Deliberately return a call: warmup must ignore it without fetching
+            // Brave, revealing its query, or starting a second inference turn.
+            write_mock_completion(
+                &mut connection,
+                serde_json::json!({
+                    "role":"assistant", "tool_calls":[{
+                        "id":"ignored-warmup-search", "type":"function",
+                        "function":{"name":"brave_web_search","arguments":r#"{"query":"DO NOT EXECUTE THIS"}"#}
+                    }]
+                }),
+                "tool_calls",
+            );
+        });
+        assert!(warmup_with_provider(&request, &provider).await.is_ok());
+        server.join().unwrap();
+    }
+
+    #[tokio::test]
+    async fn mesh_warmup_retries_native_tool_rejection_with_a_constant_json_probe() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let request: Request = serde_json::from_value(serde_json::json!({
+            "mode":"warmup", "provider":"mesh-llm", "model":"mesh-test-model",
+            "baseUrl":format!("http://127.0.0.1:{}/v1", listener.local_addr().unwrap().port()),
+            "targetNodeId":"0".repeat(64)
+        }))
+        .unwrap();
+        request.validate().unwrap();
+        let provider = create_provider(&request).unwrap();
+        let server = thread::spawn(move || {
+            for round in 0..2 {
+                let (mut connection, _) = listener.accept().unwrap();
+                let (headers, payload) = read_mock_request(&mut connection);
+                assert!(headers.starts_with("POST /v1/chat/completions HTTP/1.1"));
+                assert!(!headers.to_ascii_lowercase().contains("authorization:"));
+                assert!(headers.contains(&"0".repeat(64)));
+                assert_eq!(payload["model"], "mesh-test-model");
+                assert_eq!(payload["max_tokens"], 32);
+                let context: serde_json::Value =
+                    serde_json::from_str(payload["messages"][1]["content"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(context["recentHistory"], serde_json::json!([]));
+                assert_eq!(context["currentRequest"]["author"], "Warmup");
+                if round == 0 {
+                    assert_eq!(payload["tools"][0]["function"]["name"], "brave_web_search");
+                    let body = "data: {\"error\":{\"message\":\"Native tool schemas are unsupported.\"}}\n\ndata: [DONE]\n\n";
+                    write!(connection,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body).unwrap();
+                } else {
+                    assert!(payload
+                        .get("tools")
+                        .is_none_or(|tools| tools.as_array().is_some_and(Vec::is_empty)));
+                    assert!(payload["messages"][0]["content"]
+                        .as_str()
+                        .unwrap()
+                        .contains(JSON_SEARCH_PLAN));
+                    assert!(context["currentRequest"]["text"]
+                        .as_str()
+                        .unwrap()
+                        .contains(r#"{"action":"answer"}"#));
+                    write_mock_completion(
+                        &mut connection,
+                        serde_json::json!({
+                            "role":"assistant", "content":r#"{"action":"answer"}"#
+                        }),
+                        "stop",
+                    );
+                }
+            }
+        });
+        assert!(warmup_with_provider(&request, &provider).await.is_ok());
+        server.join().unwrap();
     }
 
     #[tokio::test]
@@ -1117,6 +1415,7 @@ mod tests {
             write!(connection, "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", response.len(), response).unwrap();
         });
         let request = Request {
+            mode: RequestMode::Answer,
             prompt: "Only this submitted message.".to_owned(),
             current_date: Some("2026-10-14".to_owned()),
             author: Some("Bob".to_owned()),

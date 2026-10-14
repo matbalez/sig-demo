@@ -25,7 +25,7 @@ export type SigDemoAgentRunRequestType = Readonly<{
   history?: ReadonlyArray<SigDemoAgentHistoryMessageType>;
 }>;
 
-export type SigDemoAgentStatusType = 'connecting' | 'responding' | 'searching';
+export type SigDemoAgentStatusType = 'responding' | 'searching';
 
 export type SigDemoAgentEventType =
   | Readonly<{ requestId: string; type: 'text'; text: string }>

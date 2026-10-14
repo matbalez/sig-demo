@@ -2505,7 +2505,6 @@ export class Message extends PureComponent<Props, State> {
         )}
         {sigDemoAgentResponse?.status === 'streaming' &&
           text !== i18n('icu:SigDemoAgent--streaming') &&
-          text !== i18n('icu:SigDemoAgent--connecting') &&
           text !== i18n('icu:SigDemoAgent--searching') && (
             <div className="sig-demo-agent-status" role="status">
               <span className="sig-demo-agent-status__dot" aria-hidden />

@@ -197,6 +197,8 @@ export class SigDemoMesh {
   #child: ChildProcess | undefined;
   #initializePromise: Promise<void> | undefined;
   #connectionPromise: Promise<SigDemoMeshInferenceType> | undefined;
+  #preparationPromise: Promise<SigDemoMeshInferenceType> | undefined;
+  #qualifiedRouteKey: string | undefined;
   #selected: SigDemoMeshInferenceType | undefined;
   #availableNodeIds: Array<string> = [];
   #startedFromCache = false;
@@ -245,6 +247,7 @@ export class SigDemoMesh {
         // Rediscover after a peer or sidecar disconnects.
       }
       this.#selected = undefined;
+      this.#qualifiedRouteKey = undefined;
     }
     if (!this.#connectionPromise) {
       this.#connectionPromise = this.#connect();
@@ -256,10 +259,79 @@ export class SigDemoMesh {
     }
   }
 
+  async prepareInference(
+    warm: (route: SigDemoMeshInferenceType) => Promise<void>
+  ): Promise<SigDemoMeshInferenceType> {
+    if (!this.#preparationPromise) {
+      this.#preparationPromise = this.#prepareInference(warm);
+    }
+    const preparation = this.#preparationPromise;
+    try {
+      return await preparation;
+    } finally {
+      if (this.#preparationPromise === preparation) {
+        this.#preparationPromise = undefined;
+      }
+    }
+  }
+
+  async #prepareInference(
+    warm: (route: SigDemoMeshInferenceType) => Promise<void>
+  ): Promise<SigDemoMeshInferenceType> {
+    let candidate: SigDemoMeshInferenceType | undefined =
+      await this.getInference();
+    const routeKey = (route: SigDemoMeshInferenceType) =>
+      `${route.targetNodeId}\u0000${route.model}`;
+    if (this.#qualifiedRouteKey === routeKey(candidate)) {
+      return candidate;
+    }
+    const child = this.#child;
+    const attemptedNodes = new Set<string>();
+    for (let attempt = 0; attempt < 2 && candidate; attempt += 1) {
+      if (this.#stopped || this.#child !== child) {
+        throw new Error('The mesh was stopped.');
+      }
+      attemptedNodes.add(candidate.targetNodeId);
+      try {
+        await warm(candidate);
+        if (this.#stopped || this.#child !== child) {
+          throw new Error('The mesh was stopped.');
+        }
+        this.#selected = candidate;
+        this.#qualifiedRouteKey = routeKey(candidate);
+        log.info('Public mesh inference warmed');
+        return candidate;
+      } catch {
+        if (this.#stopped || this.#child !== child) {
+          throw new Error('The mesh was stopped.');
+        }
+        this.#selected = undefined;
+        this.#qualifiedRouteKey = undefined;
+        log.info('Public mesh inference slow or unavailable');
+      }
+      if (attempt === 0) {
+        try {
+          candidate = this.#selectRoute(
+            (await this.#availableRoutes()).filter(
+              route => !attemptedNodes.has(route.targetNodeId)
+            )
+          );
+        } catch {
+          candidate = undefined;
+        }
+      }
+    }
+    throw new Error(
+      'No responsive mesh node is available. Try again, or choose ChatGPT in Settings → General → Inference.'
+    );
+  }
+
   stop(): void {
     this.#stopped = true;
     this.#selected = undefined;
     this.#initializePromise = undefined;
+    this.#preparationPromise = undefined;
+    this.#qualifiedRouteKey = undefined;
     if (this.#child) {
       signalOwnedGroup(this.#child, 'SIGTERM');
     }
@@ -336,6 +408,7 @@ export class SigDemoMesh {
   }
 
   async #launch(tokens?: ReadonlyArray<string>): Promise<void> {
+    this.#qualifiedRouteKey = undefined;
     if (this.#stopped) {
       throw new Error('The mesh was stopped.');
     }

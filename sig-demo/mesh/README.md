@@ -30,6 +30,14 @@ up to 24 hours. Later launches supply each hint through a separate `--join-file`
 argument to use the same parallel race; stale or unavailable hints fall back to
 fresh discovery. The cache never stores the ephemeral local client's invite.
 The app chooses a random available free text-inference node from `/v1/models`.
+An advertised model alone does not establish inference readiness. During app
+startup, a synthetic GDK request warms that selected model and its native tool
+schema, with a 12-second inference timeout and 15-second helper deadline. It
+contains no real messages, API keys, or executable search. The app tries at most
+two distinct random free hosts and retains the first responsive route. A query
+shares that preparation; unavailable routes remain retryable. The messenger
+window opens independently of the probe. Public hosts can still experience later
+queueing or prefill delays.
 An `x-mesh-target` header pins inference to that node. A missing node produces an
 error; Sig can discover another for the next request. There is no automatic
 fallback to ChatGPT and no paid-node funding.

@@ -55,6 +55,11 @@ it does not download models or share the Mac's GPU. It exits when sig demo quits
 The connection is prepared while the app opens. Public bootstrap nodes are raced
 in parallel, and eligible bootstrap hints are cached for up to 24 hours to speed
 up later launches. An unavailable cache falls back to fresh public discovery.
+Startup also runs a small, synthetic GDK inference completion on the chosen free
+node to prepare its model and tool prompt before the first chat query. A slow or
+unavailable node is skipped in favor of one other randomly selected free host.
+The probe sends no chat history, uses no API credentials, and runs no web search.
+Questions share this preparation instead of starting a second cold request.
 See [bundled mesh sidecar](mesh/README.md).
 
 Use **Node 24.21.0**, **pnpm 11.24.0**, macOS Xcode Command Line Tools, and OpenSSL.

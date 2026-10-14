@@ -43,6 +43,20 @@ Supply `OPENAI_API_KEY` privately in the ChatGPT child environment. For compatib
 
 Failures emit `{"type":"error","message":"…"}` and exit with status 1. Raw provider details, credentials, requests, reasoning output, and token usage are never printed.
 
+The helper also emits safe timing events such as
+`{"type":"timing","phase":"native-planning","durationMs":123}`. Electron
+records only the stage, elapsed time, and time since spawning the helper. The
+initial `helper-started` event distinguishes executable launch delay from model
+work. These events are not chat messages.
+
+For startup preparation, Electron can send
+`{"mode":"warmup","provider":"mesh-llm","model":"selected-model","baseUrl":"http://127.0.0.1:9337/v1","targetNodeId":"<selected-node-id>"}`.
+Warmup rejects chat content and other providers. It sends a constant `NO_SEARCH`
+request through the same GDK native tool schema, with 32 output tokens, a
+12-second inference timeout, and a 15-second total deadline. It never reads Brave
+credentials or executes suggested tools, and returns timing plus `done` without
+response text. Ordinary requests retain their existing two-minute deadline.
+
 The desktop reads a fresh snapshot of at most 12 completed text messages before the current question, from the same chat. Recent human messages and completed Sig replies are included. The history budget is 6,000 UTF-8 bytes including author labels (roughly 2,000 tokens); each history message is capped at 1,500 bytes and each author label at 96 bytes. Long messages retain their most recent text with a visible truncation marker. Deleted, erased, expired, view-once, system, unfinished, and failed-response messages are excluded. The current question is separate from this history budget.
 
 The provider receives fixed concise Sig system instructions and a user message containing structured `recentHistory` and `currentRequest` fields. The system explicitly instructs Sig to answer `currentRequest`, using quoted history only to resolve references and follow-ups. A single structured user message also works with models that require strict user/assistant turn alternation in group chats. Omitted `history` is empty and omitted `author` is `Current user`, preserving earlier callers. Electron supplies the current UTC date for time-sensitive searches.
