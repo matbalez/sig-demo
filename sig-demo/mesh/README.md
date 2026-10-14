@@ -49,7 +49,7 @@ The saved **mesh-llm (paid)** option joins only the private configured invitatio
 and selects a paid remote offer for exactly `Qwen3.6-27B-Q6_K`. It connects without
 a synthetic completion. Both mesh modes use the existing GDK bridge and local
 Brave tool; the app leaves payment negotiation and settlement to mesh-llm.
-An invocation's planning and final-answer completions all count toward its
+An invocation's answer and tool-continuation completions all count toward its
 automatic **₿500 daily budget**, including payment fees. Selecting free mesh or
 ChatGPT restores `free_only` policy. Previously submitted payments can settle.
 
@@ -78,8 +78,11 @@ The selected operator processes the current question and up to 12 recent text
 messages from the same chat, under a 6,000-byte history budget. Attachments,
 deleted or expired messages, and unfinished replies are excluded. GDK handles
 the OpenAI-compatible streaming protocol through a declarative provider with
-the explicit `/v1/chat/completions` path. A bounded GDK planning request selects
-the local Brave tool through native function calls, with a validated JSON decision
-fallback for text models that do not support them. Only the local Rust helper
-calls Brave; the chosen mesh node receives
+the explicit `/v1/chat/completions` path. A bounded streamed GDK loop lets the
+model answer or request the local Brave tool in its first turn; another turn is
+made only after executing a requested tool. Ordinary answers use one inference
+request, and a search plus answer generally uses two. Mesh charges input/output
+invoices per request. Native schemas remain available on continuation turns;
+standalone text-form search calls have a narrow validated compatibility parser.
+Only the local Rust helper calls Brave; the chosen mesh node receives
 bounded public search excerpts and source links for the final answer.

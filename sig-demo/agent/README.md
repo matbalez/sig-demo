@@ -44,17 +44,18 @@ Supply `OPENAI_API_KEY` privately in the ChatGPT child environment. For compatib
 Failures emit `{"type":"error","message":"…"}` and exit with status 1. Raw provider details, credentials, requests, reasoning output, and token usage are never printed.
 
 The helper also emits safe timing events such as
-`{"type":"timing","phase":"native-planning","durationMs":123}`. Electron
-records only the stage, elapsed time, and time since spawning the helper. The
+`{"type":"timing","phase":"model-turn","durationMs":0}`. Electron
+records only the stage, elapsed time, and time since spawning the helper. It
+counts model-turn attempts per query so extra inference calls are visible. The
 initial `helper-started` event distinguishes executable launch delay from model
 work. These events are not chat messages.
 
 For startup preparation, Electron can send
 `{"mode":"warmup","provider":"mesh-llm","model":"selected-model","baseUrl":"http://127.0.0.1:9337/v1","targetNodeId":"<selected-node-id>"}`.
-Warmup rejects chat content and other providers. It sends a constant `NO_SEARCH`
-request through the same GDK native tool schema, with 32 output tokens, a
+Warmup rejects chat content and other providers. It sends a constant `READY`
+request through the same GDK native tool schema, with 40 output tokens, a
 12-second inference timeout, and a 15-second total deadline. It never reads Brave
-credentials or executes suggested tools, and returns timing plus `done` without
+credentials or executes suggested tools, never retries inference, and returns timing plus `done` without
 response text. Ordinary requests retain their existing two-minute deadline.
 
 The desktop reads a fresh snapshot of at most 12 completed text messages before the current question, from the same chat. Recent human messages and completed Sig replies are included. The history budget is 6,000 UTF-8 bytes including author labels (roughly 2,000 tokens); each history message is capped at 1,500 bytes and each author label at 96 bytes. Long messages retain their most recent text with a visible truncation marker. Deleted, erased, expired, view-once, system, unfinished, and failed-response messages are excluded. The current question is separate from this history budget.
@@ -67,7 +68,11 @@ The app owns its bounded chat-history selection and small tool loop; it does not
 
 For **mesh-llm**, the only local tool is `brave_web_search`. Its model-visible arguments contain a search query and an optional freshness filter, never credentials. The local Rust helper calls the fixed HTTPS [Brave LLM Context endpoint](https://api-dashboard.search.brave.com/documentation/services/llm-context), which returns extracted page content and sources without a separate crawler. A call considers at most five results/URLs, asks Brave for a 2,048-token context budget, and further caps returned tool data at 6,000 UTF-8 bytes. At most two Brave searches run per question. Source excerpts are treated as quoted data and answers include direct source URLs.
 
-The official [Brave MCP server](https://github.com/brave/brave-search-mcp-server) provides the established Goose integration. This SDK-based helper uses the tool contract locally instead of adding another Node/MCP process to the app. Mesh uses GDK `ProviderTool`, assistant `ToolRequest`, and matching `ToolResult` messages. Public mesh models have inconsistent native function-call support; when a model rejects or ignores the native tool protocol, mesh uses a small validated JSON search decision through the same GDK provider. Both paths keep tool planning out of the chat and then stream the final answer through GDK. This adds a short planning request for mesh when Brave is configured; final answers still appear in one streamed Sig bubble.
+The official [Brave MCP server](https://github.com/brave/brave-search-mcp-server) provides the established Goose integration. This SDK-based helper uses the tool contract locally instead of adding another Node/MCP process to the app. Mesh uses GDK `ProviderTool`, assistant `ToolRequest`, and matching `ToolResult` messages. Each query starts one streamed answer-or-tool turn with the Brave schema available. An ordinary answer needs one inference request. An actual search runs locally, then a second model turn can answer from the returned results. At most two searches and three model turns are allowed. There are no separate native/JSON planning requests or automatic paid repair requests. The tool schema stays available on continuation turns so mesh can parse native tool calls instead of displaying them as reply text.
+
+A narrow compatibility parser recognizes standalone search control frames from text-only model output, including the observed Qwen wrapper. The aliases `search`, `web_search`, and `google_search` route only to the same local Brave tool; they never dispatch arbitrary tools or call Google. Arguments still pass the strict query/freshness validation. Invalid control frames are suppressed and fail safely without another model request. Literal examples inside Markdown code and quotes are not tool invocations. Replies still use one growing Sig bubble per user query.
+
+On paid mesh, input and output invoices are charged per model turn. A normal answer generally means one inference request and two payments; one search followed by an answer generally means two requests and four payments. Free startup warming never runs on the paid mesh. Mesh's daily spending policy applies to every model turn and its payment fees.
 
 For **ChatGPT**, a single GDK streaming request enables OpenAI's built-in [`web_search` tool](https://developers.openai.com/api/docs/guides/tools-web-search) in the Responses API, with at most two built-in tool calls. Search runs inside OpenAI's inference service. The local Brave tool and credential are absent from this path. The pinned GDK alpha12 formatter does not yet support built-in search output, so the helper vendors a narrowly patched formatter crate under `vendor/`: it enables the native tool, accepts built-in search events, and retains citation URLs as chat-visible source links. Inference still runs through the real GDK SDK.
 

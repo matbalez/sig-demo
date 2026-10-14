@@ -82,6 +82,7 @@ const chunkSchema = z.discriminatedUnion('type', [
     type: z.literal('timing'),
     phase: z.enum([
       'helper-started',
+      'model-turn',
       'native-planning',
       'json-planning',
       'search',
@@ -458,6 +459,7 @@ export function setupSigDemoAgent(
     children.set(requestId, child);
     let completed = false;
     let receivedText = false;
+    let modelTurns = 0;
     const finish = (message?: string) => {
       if (completed) {
         return;
@@ -468,6 +470,7 @@ export function setupSigDemoAgent(
       requestProviders.delete(requestId);
       log.info('Inference request finished', {
         provider,
+        modelTurns,
         result: message ? 'error' : 'complete',
         totalMs: Math.round(performance.now() - requestedAt),
       });
@@ -500,11 +503,15 @@ export function setupSigDemoAgent(
         } else if (chunk.type === 'status') {
           send({ requestId, type: 'status', status: chunk.status });
         } else if (chunk.type === 'timing') {
+          if (chunk.phase === 'model-turn') {
+            modelTurns += 1;
+          }
           log.info('Inference phase', {
             provider,
             phase: chunk.phase,
             durationMs: chunk.durationMs,
             helperEventAtMs: Math.round(performance.now() - preparedAt),
+            ...(chunk.phase === 'model-turn' ? { modelTurn: modelTurns } : {}),
           });
         } else if (chunk.type === 'error') {
           finish(chunk.message);

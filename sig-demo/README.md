@@ -58,10 +58,14 @@ Lexe is installed automatically on first startup; opening the wallet creates it
 without a phone, email, or separate login. Each installation keeps its own wallet.
 
 Selecting paid inference enables mesh's automatic spending policy with a **₿500
-daily budget**. Mesh handles inference payments, including planning requests and
+daily budget**. Mesh handles inference payments, including tool-continuation requests and
 payment fees. Paid mode connects immediately but runs no synthetic GDK warmup.
 Returning to free mesh or ChatGPT restores free-only policy; already submitted
 payments may still settle. The budget resets on UTC calendar days.
+Ordinary answers use one streamed model request. A requested Brave search runs
+locally, then another model turn can answer using its results. Mesh charges one
+input and one output payment per model request, so a search plus answer generally
+uses two requests and four payments. No separate search-planning preflight runs.
 
 At app startup, sig demo stops other `mesh-llm` processes owned by the current
 user, then starts its bundled version on local ports 9337 and 3131. This interrupts
