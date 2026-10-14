@@ -16,16 +16,17 @@ import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { loadSigDemoPackageConfig } from './sig-demo-package-config.mjs';
 
 const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE] [--paid-mesh-config-file FILE]\nBuilds sig demo with its native GDK SDK, mesh-llm sidecar, and approved private demo configuration; no publishing or notarization.'
+    'Usage: node scripts/package-sig-demo.mjs --config FILE [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE] [--paid-mesh-config-file FILE]\nBuilds sig demo with its native GDK SDK, mesh-llm sidecar, and approved private demo configuration; no publishing or notarization.'
   );
   process.exit(0);
 }
-let configPath = resolve(root, '.sig-demo/client.json');
+let configPath;
 let arch = process.arch;
 let agentKeyPath = resolve(root, '.sig-demo/agent.env');
 let braveKeyPath = resolve(root, '.sig-demo/brave.env');
@@ -52,6 +53,7 @@ for (let index = 0; index < args.length; index += 1) {
     throw new Error(`Unknown or incomplete argument: ${args[index]}`);
   }
 }
+const config = loadSigDemoPackageConfig(configPath);
 if (process.platform !== 'darwin' || arch !== 'arm64') {
   throw new Error(
     'The bundled mesh-llm release currently targets macOS arm64.'
@@ -82,14 +84,6 @@ function assertOfficialMeshHost(path) {
   }
 }
 assertOfficialMeshHost(resolve(meshResources, 'mesh-llm'));
-const config = JSON.parse(readFileSync(configPath, 'utf8'));
-// Share the runtime's fail-closed policy when baking the private server config.
-const { assertSigDemoNetworkConfig } =
-  // oxlint-disable-next-line signal-desktop/no-restricted-paths
-  await import('../ts/util/sigDemoIsolation.std.ts');
-assertSigDemoNetworkConfig(config);
-config.storageProfile = 'demo';
-delete config.storagePath;
 const bakedPath = resolve(root, 'config/local-production.json');
 const previous = existsSync(bakedPath) ? readFileSync(bakedPath) : undefined;
 const buildMetadata = previous ? JSON.parse(previous.toString('utf8')) : {};

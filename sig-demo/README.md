@@ -145,13 +145,18 @@ For a local backend, these same files live under `.sig-demo/server-data/`.
 Pending client signup material stays inside its encrypted profile, so interrupted
 setup can resume with the same invitation and keys.
 
-After generating current assets, package a local macOS app:
+After generating current assets, package a macOS app for the hosted VPS demo:
 
 ```sh
 sh sig-demo/gdk/build-native.sh
 node scripts/fetch-sig-demo-mesh.mjs
-pnpm run demo:package --config .sig-demo/client.json --arch arm64
+pnpm run demo:package --config .sig-demo/vps-client.json --arch arm64
 ```
+
+Packaging requires an explicit `--config` selection. Use `.sig-demo/vps-client.json`
+for the hosted demo; `.sig-demo/client.json` created by local backend initialization
+expects that backend to be running on the same Mac. There is no implicit fallback
+from the hosted configuration to a local server.
 
 The local agent needs the approved demo credentials in ignored
 `.sig-demo/agent.env` (`OPENAI_API_KEY`) and `.sig-demo/brave.env`
