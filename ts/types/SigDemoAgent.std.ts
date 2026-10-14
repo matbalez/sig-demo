@@ -15,6 +15,8 @@ export const SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES = 3 * 1024 * 1024;
 export const SIG_DEMO_AGENT_INPUT_AUTHOR_MAX_BYTES = 4096;
 
 export type SigDemoAgentHistoryMessageType = Readonly<{
+  // Local bookkeeping only; the native agent excludes IDs from model prompts.
+  id: string;
   role: 'user' | 'assistant';
   author: string;
   text: string;
@@ -22,6 +24,11 @@ export type SigDemoAgentHistoryMessageType = Readonly<{
 
 export type SigDemoAgentRunRequestType = Readonly<{
   requestId: string;
+  accountId: string;
+  chatId: string;
+  queryMessageId: string;
+  responseMessageId: string;
+  sourceText: string;
   prompt: string;
   provider: SigDemoInferenceProviderType;
   author?: string;

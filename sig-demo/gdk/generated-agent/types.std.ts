@@ -12,12 +12,16 @@ export type SigAgentConfig = Readonly<{
 }>;
 export type SigAgentRequest = Readonly<{
   mode: SigAgentMode;
+  queryId: string;
+  responseId: string;
+  sourceText: string;
   prompt: string;
   author?: string | null;
   history: ReadonlyArray<SigHistoryMessage>;
   currentDate?: string | null;
 }>;
 export type SigHistoryMessage = Readonly<{
+  id: string;
   role: SigHistoryRole;
   author: string;
   text: string;

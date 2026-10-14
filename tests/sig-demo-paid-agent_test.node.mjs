@@ -47,6 +47,7 @@ const stubs = new Map([
     `export const createSigDemoAgentRuntime = () => ({
       runSigDemoAgent: (...args) => globalThis.${harnessKey}.run(...args),
       warmSigDemoMesh: (...args) => globalThis.${harnessKey}.warm(...args),
+      disposeSessions: () => globalThis.${harnessKey}.record('sessions-disposed'),
     });`,
   ],
   [
@@ -111,6 +112,7 @@ function createHarness() {
   const mainFrame = {};
   const sender = {
     mainFrame,
+    once: (name, callback) => listeners.set(`sender:${name}`, callback),
     isDestroyed: () => false,
     send: (channel, value) => events.push({ channel, value }),
   };
@@ -225,10 +227,22 @@ function createHarness() {
 
 const question = provider => ({
   requestId,
+  accountId: 'local-account-a',
+  chatId: 'chat-a',
+  queryMessageId: 'question-a',
+  responseMessageId: 'answer-a',
+  sourceText: '@sig What is 2 + 3?',
   provider,
   prompt: 'What is 2 + 3?',
   author: 'Alice',
-  history: [{ role: 'user', author: 'Bob', text: 'We are doing arithmetic.' }],
+  history: [
+    {
+      id: 'prior-message',
+      role: 'user',
+      author: 'Bob',
+      text: 'We are doing arithmetic.',
+    },
+  ],
 });
 
 // Synthetic ambient credentials verify that only explicit provider credentials
@@ -612,6 +626,74 @@ try {
       assert.equal(harness.events.length, 0);
     } finally {
       harness.cleanup();
+    }
+  });
+
+  await test('account changes drain old native work before releasing sessions and starting the new account', async () => {
+    const harness = createHarness();
+    try {
+      harness.runtimeReply = false;
+      assert.equal(
+        (await harness.invoke('sig-demo-agent:start', question('mesh-llm'))).ok,
+        true
+      );
+      harness.abortGate = Promise.withResolvers();
+      const next = harness.invoke('sig-demo-agent:start', {
+        ...question('mesh-llm'),
+        requestId: '00000000-0000-4000-8000-000000000002',
+        accountId: 'local-account-b',
+      });
+      await tick();
+      assert.equal(harness.calls[0].aborted, true);
+      assert.equal(harness.calls.length, 1);
+      assert.equal(
+        harness.records.some(([name]) => name === 'sessions-disposed'),
+        false
+      );
+      harness.abortGate.resolve();
+      assert.equal((await next).ok, true);
+      assert.equal(harness.calls.length, 2);
+      assert.equal(harness.calls[1].request.accountId, 'local-account-b');
+      const disposedAt = harness.records.findIndex(
+        ([name]) => name === 'sessions-disposed'
+      );
+      const nextRunAt = harness.records.findIndex(
+        ([name, index]) => name === 'run' && index === 1
+      );
+      assert.ok(disposedAt >= 0 && disposedAt < nextRunAt);
+    } finally {
+      harness.abortGate?.resolve();
+      harness.cleanup();
+      await tick();
+    }
+  });
+
+  await test('closing the owning renderer drains requests and releases its native sessions', async () => {
+    const harness = createHarness();
+    try {
+      harness.runtimeReply = false;
+      assert.equal(
+        (await harness.invoke('sig-demo-agent:start', question('mesh-llm'))).ok,
+        true
+      );
+      harness.abortGate = Promise.withResolvers();
+      harness.listeners.get('sender:destroyed')();
+      await tick();
+      assert.equal(harness.calls[0].aborted, true);
+      assert.equal(
+        harness.records.some(([name]) => name === 'sessions-disposed'),
+        false
+      );
+      harness.abortGate.resolve();
+      await tick();
+      assert.equal(
+        harness.records.filter(([name]) => name === 'sessions-disposed').length,
+        1
+      );
+    } finally {
+      harness.abortGate?.resolve();
+      harness.cleanup();
+      await tick();
     }
   });
 

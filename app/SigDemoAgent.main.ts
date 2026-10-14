@@ -32,6 +32,7 @@ import {
 } from './SigDemoAgentErrors.std.ts';
 
 const log = createLogger('SigDemoAgent');
+const localIdSchema = z.string().min(1).max(256);
 
 const authorSchema = z
   .string()
@@ -41,6 +42,7 @@ const authorSchema = z
 const historySchema = z
   .array(
     z.object({
+      id: localIdSchema,
       role: z.enum(['user', 'assistant']),
       author: authorSchema,
       text: z.string().min(1),
@@ -60,6 +62,11 @@ const historySchema = z
 const providerSchema = z.enum(['mesh-llm', 'mesh-llm-paid', 'chatgpt']);
 const requestSchema = z.object({
   requestId: z.string().uuid(),
+  accountId: localIdSchema,
+  chatId: localIdSchema,
+  queryMessageId: localIdSchema,
+  responseMessageId: localIdSchema,
+  sourceText: z.string().min(1).max(131_072),
   prompt: z.string().trim().min(1).max(65_536),
   provider: providerSchema,
   author: authorSchema.optional(),
@@ -166,6 +173,25 @@ export function setupSigDemoAgent(
   let selectedProvider = SIG_DEMO_DEFAULT_INFERENCE_PROVIDER;
   let selectionGeneration = 0;
   let nativeDrain: Promise<void> = Promise.resolve();
+  let activeAccountId: string | undefined;
+  let sessionOwner: WebContents | undefined;
+  const resetSessions = () => {
+    selectionGeneration += 1;
+    starting.clear();
+    requestProviders.clear();
+    const cancelled = [...tasks.values(), ...warmTasks];
+    for (const task of cancelled) {
+      task.controller.abort();
+    }
+    const previousDrain = nativeDrain;
+    nativeDrain = (async () => {
+      await Promise.allSettled([
+        previousDrain,
+        ...cancelled.map(task => task.done),
+      ]);
+      nativeRuntime?.disposeSessions();
+    })();
+  };
   const warmMeshInference = async (
     inference: SigDemoMeshInferenceType
   ): Promise<void> => {
@@ -327,7 +353,34 @@ export function setupSigDemoAgent(
     ) {
       return { ok: false, error: 'Sig could not start this request.' };
     }
-    const { requestId, prompt, provider, author, history } = parsed.data;
+    const {
+      requestId,
+      accountId,
+      chatId,
+      queryMessageId,
+      responseMessageId,
+      sourceText,
+      prompt,
+      provider,
+      author,
+      history,
+    } = parsed.data;
+    if (sessionOwner !== event.sender) {
+      sessionOwner = event.sender;
+      event.sender.once('destroyed', () => {
+        if (sessionOwner === event.sender) {
+          sessionOwner = undefined;
+          activeAccountId = undefined;
+          resetSessions();
+        }
+      });
+    }
+    if (activeAccountId !== accountId) {
+      if (activeAccountId !== undefined) {
+        resetSessions();
+      }
+      activeAccountId = accountId;
+    }
     const requestedAt = performance.now();
     const send = (chunk: SigDemoAgentEventType) => {
       if (!event.sender.isDestroyed()) {
@@ -436,6 +489,11 @@ export function setupSigDemoAgent(
         await getRuntime().runSigDemoAgent(
           {
             prompt,
+            accountId,
+            chatId,
+            queryMessageId,
+            responseMessageId,
+            sourceText,
             provider: provider === 'chatgpt' ? 'chatgpt' : 'mesh-llm',
             author,
             history,
@@ -528,6 +586,7 @@ export function setupSigDemoAgent(
     for (const task of warmTasks) {
       task.controller.abort();
     }
+    nativeRuntime?.disposeSessions();
     mesh.stop();
   });
 }

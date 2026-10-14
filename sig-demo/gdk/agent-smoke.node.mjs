@@ -32,10 +32,13 @@ process.env.OPENAI_API_KEY = ambientKey;
 process.env.BRAVE_SEARCH_API_KEY = braveKey;
 const target = 'a'.repeat(64);
 const requests = [];
+const requestBodies = [];
 const validations = [];
 const sockets = new Set();
 let phase = 'setup';
 let cancelledSocket = false;
+let queuedActive = 0;
+let queuedMaximum = 0;
 const frames = values =>
   values.map(value => `data: ${JSON.stringify(value)}\n\n`).join('') +
   'data: [DONE]\n\n';
@@ -51,11 +54,30 @@ const server = createServer(async (request, response) => {
     for await (const data of request) input += data;
     const body = JSON.parse(input);
     requests.push(body.model);
+    requestBodies.push(body);
     assert.equal(request.url, '/v1/chat/completions');
     assert.equal(request.headers.authorization, undefined);
     assert.equal(request.headers['x-mesh-target'], target);
     assert.ok(!input.includes(ambientKey));
     assert.ok(!input.includes(braveKey));
+    for (const localId of [
+      'account-a',
+      'account-b',
+      'account-c',
+      'chat-a',
+      'chat-b',
+      'chat-c',
+      'synthetic-query',
+      'synthetic-response',
+      'session-query-',
+      'session-response-',
+      'context-0',
+    ]) {
+      assert.ok(
+        !input.includes(localId),
+        'A local session ID reached inference.'
+      );
+    }
     assert.equal(body.stream, true);
     assert.equal(body.parallel_tool_calls, false);
     assert.deepEqual(body.chat_template_kwargs, { enable_thinking: false });
@@ -152,7 +174,12 @@ const server = createServer(async (request, response) => {
       );
       return;
     }
+    if (body.model === 'queued-session-mock') {
+      queuedActive += 1;
+      queuedMaximum = Math.max(queuedMaximum, queuedActive);
+    }
     await delay(100);
+    if (body.model === 'queued-session-mock') queuedActive -= 1;
     response.end(
       frames([
         chunk(body.model, { content: 'Hydrogen' }),
@@ -192,16 +219,19 @@ const config = (model, search = false) => ({
 });
 const request = overrides => ({
   mode: 'Answer',
+  queryId: 'synthetic-query',
+  responseId: 'synthetic-response',
+  sourceText: '@sig What comes first?',
   prompt: 'What comes first?',
   author: 'Alice',
   history: [],
   currentDate: '2026-10-14',
   ...overrides,
 });
-const idle = () =>
+const idle = (objects = 0) =>
   assert.deepEqual(agent.diagnostics(), {
     activeFutures: 0,
-    activeObjects: 0,
+    activeObjects: objects,
     pendingPolls: 0,
   });
 async function collect(stream) {
@@ -255,6 +285,7 @@ try {
         prompt: 'Which one is largest?',
         author: '  Alice   Example  ',
         history: Array.from({ length: 20 }, (_, index) => ({
+          id: `context-${index}`,
           role: index % 2 ? 'Assistant' : 'User',
           author: 'Participant',
           text: `${index} ${'🙂'.repeat(600)} ${index === 19 ? 'LATEST' : ''}`,
@@ -317,8 +348,119 @@ try {
   findings.nativeValidationPrecedesInference = true;
   idle();
 
+  phase = 'reusable-sessions';
+  const sessions = [
+    agent.createSession('account-a', 'chat-a'),
+    agent.createSession('account-a', 'chat-b'),
+    agent.createSession('account-b', 'chat-a'),
+  ];
+  try {
+    const firstPrompt = 'Session Alpha marker';
+    const firstSource = `@sig ${firstPrompt}`;
+    events = await collect(
+      await sessions[0].run(
+        config('session-mock'),
+        request({
+          queryId: 'session-query-1',
+          responseId: 'session-response-1',
+          prompt: firstPrompt,
+          sourceText: firstSource,
+        })
+      )
+    );
+    assert.ok(events.some(event => event.kind === 'Done'));
+    idle(3);
+    events = await collect(
+      await sessions[0].run(
+        config('session-mock'),
+        request({
+          queryId: 'session-query-2',
+          responseId: 'session-response-2',
+          prompt: 'Explain your last answer.',
+          sourceText: '@sig Explain your last answer.',
+          history: [
+            {
+              id: 'session-query-1',
+              role: 'User',
+              author: 'Alice',
+              text: firstSource,
+            },
+            {
+              id: 'session-response-1',
+              role: 'Assistant',
+              author: 'Sig',
+              text: 'Hydrogen is first.',
+            },
+          ],
+        })
+      )
+    );
+    assert.ok(events.some(event => event.kind === 'Done'));
+    const retained = requestBodies.filter(
+      body => body.model === 'session-mock'
+    );
+    assert.equal(retained.length, 2);
+    assert.ok(
+      retained[1].messages.some(
+        message =>
+          message.role === 'assistant' &&
+          message.content.includes('Hydrogen is first.')
+      ),
+      'A repeated run lost the existing native assistant turn.'
+    );
+    assert.ok(JSON.stringify(retained[1].messages).includes(firstPrompt));
+    idle(3);
+
+    // Independent account/chat handles must retain only their own conversation.
+    await Promise.all(
+      sessions.slice(1).map(async session => {
+        const isolatedEvents = await collect(
+          await session.run(config('isolated-session-mock'), request())
+        );
+        assert.ok(isolatedEvents.some(event => event.kind === 'Done'));
+      })
+    );
+    for (const body of requestBodies.filter(
+      value => value.model === 'isolated-session-mock'
+    )) {
+      assert.ok(!JSON.stringify(body.messages).includes(firstPrompt));
+      assert.ok(!body.messages.some(message => message.role === 'assistant'));
+    }
+    const queued = await Promise.all(
+      [1, 2].map(async index =>
+        collect(
+          await sessions[0].run(
+            config('queued-session-mock'),
+            request({
+              queryId: `queued-query-${index}`,
+              responseId: `queued-response-${index}`,
+            })
+          )
+        )
+      )
+    );
+    assert.ok(
+      queued.every(values => values.some(event => event.kind === 'Done'))
+    );
+    assert.equal(
+      requests.filter(model => model === 'queued-session-mock').length,
+      2
+    );
+    assert.equal(
+      queuedMaximum,
+      1,
+      'One chat issued overlapping inference turns.'
+    );
+    findings.nativeSessionSerializesConcurrentRuns = true;
+    findings.nativeSessionReusesConversationAndIsolatesAccountsAndChats = true;
+  } finally {
+    for (const session of sessions) session.dispose();
+  }
+  idle();
+
   phase = 'cancel';
-  const stream = await agent.start(config('pending-mock'), request());
+  const cancelledSession = agent.createSession('account-c', 'chat-c');
+  const stream = await cancelledSession.run(config('pending-mock'), request());
   try {
     const deadline = performance.now() + 3000;
     while (!requests.includes('pending-mock') && performance.now() < deadline) {
@@ -340,7 +482,23 @@ try {
     await stream.shutdown();
     stream.dispose();
   }
+  idle(1);
+  try {
+    events = await collect(
+      await cancelledSession.run(
+        config('after-cancel-mock'),
+        request({
+          queryId: 'after-cancel-query',
+          responseId: 'after-cancel-response',
+        })
+      )
+    );
+    assert.ok(events.some(event => event.kind === 'Done'));
+  } finally {
+    cancelledSession.dispose();
+  }
   findings.cancellationDrainsNativeJobAndClosesSocket = true;
+  findings.cancelledSessionCanRunAgainWithoutLeakingAnActiveJob = true;
   idle();
   assert.deepEqual(validations, []);
   process.stdout.write(

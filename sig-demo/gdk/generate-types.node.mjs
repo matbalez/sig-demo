@@ -37,7 +37,12 @@ function typeOf(type) {
       return nameOf(type.name);
     case 'object':
       if (
-        ['Provider', 'ProviderStream', 'SigAgentStream'].includes(type.name)
+        [
+          'Provider',
+          'ProviderStream',
+          'SigAgentStream',
+          'SigAgentSession',
+        ].includes(type.name)
       ) {
         usedObjects.add(type.name);
         return type.name;

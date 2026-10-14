@@ -70,9 +70,13 @@ fn fixture() -> (
     };
     let request = SigAgentRequest {
         mode: SigAgentMode::Answer,
+        query_id: "query-1".into(),
+        response_id: "reply-1".into(),
+        source_text: "@sig What about that?".into(),
         prompt: "What about that?".into(),
         author: Some(" Alice ".into()),
         history: vec![crate::SigHistoryMessage {
+            id: "earlier-answer".into(),
             role: crate::SigHistoryRole::Assistant,
             author: "ignored".into(),
             text: "Earlier quoted answer".into(),
@@ -230,6 +234,8 @@ fn brave_server() -> (String, thread::JoinHandle<()>) {
 #[tokio::test]
 async fn real_state_machine_dispatches_native_brave_and_continues_once() {
     let (config, request, flow, mut events) = fixture();
+    let first_request = request.clone();
+    let memory = Memory::default();
     let (endpoint, server) = brave_server();
     let provider = ScriptProvider::new(vec![
         vec![Message::assistant().with_text(
@@ -239,33 +245,36 @@ async fn real_state_machine_dispatches_native_brave_and_continues_once() {
     ]);
     tokio::time::timeout(
         Duration::from_secs(8),
-        answer_with_components(
+        answer_in_memory(
             &config,
             request,
             flow.clone(),
             CancellationToken::new(),
             provider.clone(),
             Some(BraveSearch::for_test("synthetic-key", &endpoint)),
+            &memory,
         ),
     )
     .await
     .unwrap()
     .unwrap();
     server.join().unwrap();
-    let requests = provider.requests.lock().unwrap();
-    assert_eq!(requests.len(), 2);
-    assert_eq!(requests[0].tools[0].name, "brave_web_search");
-    let response = requests[1]
-        .messages
-        .iter()
-        .flat_map(|message| &message.content)
-        .find_map(MessageContent::as_tool_response)
-        .unwrap();
-    assert_eq!(response.id, "sig-search-0-0");
-    let result = response.tool_result.as_ref().unwrap();
-    assert!(serde_json::to_string(result)
-        .unwrap()
-        .contains("https://example.test/source"));
+    {
+        let requests = provider.requests.lock().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0].tools[0].name, "brave_web_search");
+        let response = requests[1]
+            .messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .find_map(MessageContent::as_tool_response)
+            .unwrap();
+        assert_eq!(response.id, "sig-search-0-0");
+        let result = response.tool_result.as_ref().unwrap();
+        assert!(serde_json::to_string(result)
+            .unwrap()
+            .contains("https://example.test/source"));
+    }
     assert_eq!(flow.counts.lock().unwrap().searches, 1);
     let mut text = String::new();
     while let Ok(event) = events.try_recv() {
@@ -274,4 +283,165 @@ async fn real_state_machine_dispatches_native_brave_and_continues_once() {
         }
     }
     assert_eq!(text, "Found https://example.test/source");
+
+    // A new invocation runs a fresh genuine state machine on the same native
+    // session. Only neutral, bounded references cross the invocation boundary.
+    let (_, mut followup, followup_flow, _) = fixture();
+    followup.query_id = "query-2".into();
+    followup.response_id = "reply-2".into();
+    followup.source_text = "@sig What did that source say?".into();
+    followup.history = anchored_history(&first_request, &text);
+    let followup_provider = ScriptProvider::new(vec![vec![
+        Message::assistant().with_text("It explained the SDK.")
+    ]]);
+    answer_in_memory(
+        &config,
+        followup,
+        followup_flow,
+        CancellationToken::new(),
+        followup_provider.clone(),
+        None,
+        &memory,
+    )
+    .await
+    .unwrap();
+    let requests = followup_provider.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].messages[1].role, rmcp::model::Role::Assistant);
+    assert_eq!(requests[0].messages[1].as_concat_text(), text);
+    assert!(
+        requests[0]
+            .messages
+            .iter()
+            .flat_map(|message| &message.content)
+            .all(|content| content.as_tool_request().is_none()
+                && content.as_tool_response().is_none())
+    );
+    let current: serde_json::Value =
+        serde_json::from_str(&requests[0].messages.last().unwrap().as_concat_text()).unwrap();
+    assert!(current["recentSearchContext"]
+        .to_string()
+        .contains("https://example.test/source"));
+    assert!(
+        serde_json::to_vec(&current["recentSearchContext"])
+            .unwrap()
+            .len()
+            <= 2048
+    );
+    assert!(!current.to_string().contains("query-1"));
+    assert!(!current.to_string().contains("reply-1"));
+}
+
+fn anchored_history(request: &SigAgentRequest, response: &str) -> Vec<crate::SigHistoryMessage> {
+    vec![
+        crate::SigHistoryMessage {
+            id: request.query_id.clone(),
+            role: crate::SigHistoryRole::User,
+            author: "Alice".into(),
+            text: request.source_text.clone(),
+        },
+        crate::SigHistoryMessage {
+            id: request.response_id.clone(),
+            role: crate::SigHistoryRole::Assistant,
+            author: "Sig".into(),
+            text: response.into(),
+        },
+    ]
+}
+
+#[tokio::test]
+async fn reusable_native_session_retains_eligible_answers_and_prunes_edits_or_absence() {
+    let memory = Memory::default();
+    let native_id = memory.session.lock().unwrap().id.clone();
+    let (config, first, flow, _) = fixture();
+    let first_provider = ScriptProvider::new(vec![vec![
+        Message::assistant().with_text("retained-marker")
+    ]]);
+    answer_in_memory(
+        &config,
+        first.clone(),
+        flow,
+        CancellationToken::new(),
+        first_provider,
+        None,
+        &memory,
+    )
+    .await
+    .unwrap();
+    assert_eq!(memory.session.lock().unwrap().retained.len(), 1);
+
+    for case in ["valid", "edited", "deleted"] {
+        let (_, mut request, flow, _) = fixture();
+        request.query_id = format!("next-{case}");
+        request.response_id = format!("response-{case}");
+        request.history = anchored_history(&first, "retained-marker");
+        if case == "edited" {
+            request.history[0].text.push_str(" edited");
+        }
+        if case == "deleted" {
+            request.history.clear();
+        }
+        let provider =
+            ScriptProvider::new(vec![vec![Message::assistant().with_text("new answer")]]);
+        answer_in_memory(
+            &config,
+            request,
+            flow,
+            CancellationToken::new(),
+            provider.clone(),
+            None,
+            &memory,
+        )
+        .await
+        .unwrap();
+        let requests = provider.requests.lock().unwrap();
+        let prior = requests[0].messages.iter().find(|message| {
+            message.role == rmcp::model::Role::Assistant
+                && message.as_concat_text() == "retained-marker"
+        });
+        assert_eq!(prior.is_some(), case == "valid");
+        assert_eq!(memory.session.lock().unwrap().id, native_id);
+    }
+}
+
+#[tokio::test]
+async fn different_native_sessions_never_reuse_each_others_answers() {
+    let first_memory = Memory::default();
+    let other_memory = Memory::default();
+    assert_ne!(
+        first_memory.session.lock().unwrap().id,
+        other_memory.session.lock().unwrap().id
+    );
+    let (config, first, flow, _) = fixture();
+    answer_in_memory(
+        &config,
+        first.clone(),
+        flow,
+        CancellationToken::new(),
+        ScriptProvider::new(vec![vec![Message::assistant().with_text("private-marker")]]),
+        None,
+        &first_memory,
+    )
+    .await
+    .unwrap();
+    let (_, mut request, flow, _) = fixture();
+    request.history = anchored_history(&first, "private-marker");
+    let provider = ScriptProvider::new(vec![vec![Message::assistant().with_text("other answer")]]);
+    answer_in_memory(
+        &config,
+        request,
+        flow,
+        CancellationToken::new(),
+        provider.clone(),
+        None,
+        &other_memory,
+    )
+    .await
+    .unwrap();
+    // Signal's explicit shared transcript may quote the marker, but it must not
+    // become an independently retained native answer in another owned scope.
+    assert!(!provider.requests.lock().unwrap()[0]
+        .messages
+        .iter()
+        .any(|message| message.role == rmcp::model::Role::Assistant));
 }

@@ -24,8 +24,16 @@ export const uniffiSchema = {
   },
   checksums: [
     {
+      symbol: 'uniffi_sig_demo_agent_checksum_func_create_sig_agent_session',
+      value: 29984,
+    },
+    {
       symbol: 'uniffi_sig_demo_agent_checksum_func_start_sig_agent',
       value: 35061,
+    },
+    {
+      symbol: 'uniffi_sig_demo_agent_checksum_method_sigagentsession_run',
+      value: 24948,
     },
     {
       symbol: 'uniffi_sig_demo_agent_checksum_method_sigagentstream_cancel',
@@ -188,6 +196,36 @@ export const uniffiSchema = {
     {
       arguments: [
         {
+          name: 'account_id',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'chat_id',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      async: false,
+      error: 'SigAgentError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_sig_demo_agent_fn_func_create_sig_agent_session',
+      },
+      futureFlavor: 'u64',
+      name: 'create_sig_agent_session',
+      return: {
+        kind: 'object',
+        name: 'SigAgentSession',
+      },
+    },
+    {
+      arguments: [
+        {
           name: 'config',
           type: {
             kind: 'record',
@@ -255,6 +293,55 @@ export const uniffiSchema = {
   },
   namespace: 'sig_demo_agent',
   objects: [
+    {
+      clone: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_sig_demo_agent_fn_clone_sigagentsession',
+      },
+      free: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_sig_demo_agent_fn_free_sigagentsession',
+      },
+      methods: [
+        {
+          arguments: [
+            {
+              name: 'config',
+              type: {
+                kind: 'record',
+                name: 'SigAgentConfig',
+              },
+            },
+            {
+              name: 'request',
+              type: {
+                kind: 'record',
+                name: 'SigAgentRequest',
+              },
+            },
+          ],
+          async: true,
+          error: 'SigAgentError',
+          ffi: {
+            arguments: ['uint64', 'rust_buffer', 'rust_buffer'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_sig_demo_agent_fn_method_sigagentsession_run',
+          },
+          futureFlavor: 'u64',
+          name: 'run',
+          return: {
+            kind: 'object',
+            name: 'SigAgentStream',
+          },
+        },
+      ],
+      name: 'SigAgentSession',
+    },
     {
       clone: {
         arguments: ['uint64'],
@@ -386,6 +473,24 @@ export const uniffiSchema = {
           },
         },
         {
+          name: 'query_id',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'response_id',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'source_text',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
           name: 'prompt',
           type: {
             kind: 'string',
@@ -424,6 +529,12 @@ export const uniffiSchema = {
     },
     {
       fields: [
+        {
+          name: 'id',
+          type: {
+            kind: 'string',
+          },
+        },
         {
           name: 'role',
           type: {

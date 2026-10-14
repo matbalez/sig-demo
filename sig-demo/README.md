@@ -28,7 +28,15 @@ answers, within a 6,000-byte budget. It shortens long messages, constructs Sig's
 prompts, and keeps the current question separate from quoted chat history.
 Attachments, deleted or expired messages, and unfinished replies are excluded.
 The Rust state machine owns the conversation, tool execution, and model
-continuations for that query. There is no separate persistent agent memory.
+continuations in a reusable session for that local account and chat. It
+serializes turns within a chat and rebuilds each turn's context from the current
+eligible Signal window, removing information that is no longer present. Up to
+2 KB of earlier Brave excerpts can remain as background only while the original
+query and completed reply still match records in that window. Account and
+message IDs stay local; inference receives no such bookkeeping identifiers.
+Sessions survive provider changes, live only in memory, and are cleared when the
+account changes, the chat window closes, or the app quits. There is no separate
+on-disk agent memory.
 See [native Goose integration](gdk/README.md).
 
 With either **mesh-llm** option, Sig can call a local Brave web-search tool when a question needs

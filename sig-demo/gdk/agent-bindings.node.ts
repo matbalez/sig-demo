@@ -73,6 +73,26 @@ export class SigAgentStream extends NativeObject {
   }
 }
 
+/** One account/chat conversation, retained by the native Goose runtime. */
+export class SigAgentSession extends NativeObject {
+  constructor(runtime: NativeRuntime, value: bigint) {
+    super(runtime, value, 'SigAgentSession');
+  }
+
+  run(
+    config: SigAgentConfig,
+    request: SigAgentRequest,
+    signal?: AbortSignal
+  ): Promise<SigAgentStream> {
+    return this.runtime.callAsync(
+      this.runtime.method(this, 'run'),
+      [config, request],
+      this,
+      signal
+    ) as Promise<SigAgentStream>;
+  }
+}
+
 export class SigAgentBindings {
   readonly #runtime: NativeRuntime;
 
@@ -82,9 +102,18 @@ export class SigAgentBindings {
       createObject: (runtime, value, name) => {
         if (name === 'SigAgentStream')
           return new SigAgentStream(runtime, value);
+        if (name === 'SigAgentSession')
+          return new SigAgentSession(runtime, value);
         return new NativeObject(runtime, value, name);
       },
     });
+  }
+
+  createSession(accountId: string, chatId: string): SigAgentSession {
+    return this.#runtime.factory('create_sig_agent_session', [
+      accountId,
+      chatId,
+    ]) as SigAgentSession;
   }
 
   start(

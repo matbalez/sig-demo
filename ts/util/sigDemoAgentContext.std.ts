@@ -96,6 +96,7 @@ export function collectSigDemoAgentHistoryCandidates({
       break;
     }
     candidates.push({
+      id: message.id,
       role: message.sigDemoAgentResponse ? 'assistant' : 'user',
       author,
       text,

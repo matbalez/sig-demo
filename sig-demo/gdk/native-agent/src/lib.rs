@@ -8,6 +8,7 @@ mod compat_provider;
 mod context;
 mod errors;
 mod runtime;
+mod sessions;
 mod tool_compat;
 
 use std::sync::{Arc, OnceLock};
@@ -41,6 +42,8 @@ pub enum SigHistoryRole {
 
 #[derive(Clone, Debug, serde::Serialize, uniffi::Record)]
 pub struct SigHistoryMessage {
+    #[serde(skip_serializing)]
+    pub id: String,
     pub role: SigHistoryRole,
     pub author: String,
     pub text: String,
@@ -49,6 +52,9 @@ pub struct SigHistoryMessage {
 #[derive(Clone, Debug, uniffi::Record)]
 pub struct SigAgentRequest {
     pub mode: SigAgentMode,
+    pub query_id: String,
+    pub response_id: String,
+    pub source_text: String,
     pub prompt: String,
     pub author: Option<String>,
     pub history: Vec<SigHistoryMessage>,
@@ -146,11 +152,53 @@ pub async fn start_sig_agent(
     config: SigAgentConfig,
     request: SigAgentRequest,
 ) -> Result<Arc<SigAgentStream>, SigAgentError> {
+    start_stream(config, request, Arc::new(runtime::Memory::default()))
+}
+
+#[derive(uniffi::Object)]
+pub struct SigAgentSession {
+    memory: Arc<runtime::Memory>,
+}
+
+#[uniffi::export]
+pub fn create_sig_agent_session(
+    account_id: String,
+    chat_id: String,
+) -> Result<Arc<SigAgentSession>, SigAgentError> {
+    if [&account_id, &chat_id]
+        .iter()
+        .any(|id| id.is_empty() || id.len() > 1024 || id.chars().any(char::is_control))
+    {
+        return Err(SigAgentError::internal());
+    }
+    // The owned handle is the scope. Scope identifiers never enter a prompt,
+    // credential cache, global registry, or provider payload.
+    Ok(Arc::new(SigAgentSession {
+        memory: Arc::new(runtime::Memory::default()),
+    }))
+}
+
+#[uniffi::export]
+impl SigAgentSession {
+    pub async fn run(
+        &self,
+        config: SigAgentConfig,
+        request: SigAgentRequest,
+    ) -> Result<Arc<SigAgentStream>, SigAgentError> {
+        start_stream(config, request, Arc::clone(&self.memory))
+    }
+}
+
+fn start_stream(
+    config: SigAgentConfig,
+    request: SigAgentRequest,
+    memory: Arc<runtime::Memory>,
+) -> Result<Arc<SigAgentStream>, SigAgentError> {
     let cancellation = CancellationToken::new();
     let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
     let cancel = cancellation.clone();
     let task = native_runtime()?.spawn(async move {
-        runtime::run(config, request, sender, cancel).await;
+        runtime::run(config, request, sender, cancel, memory).await;
     });
     Ok(Arc::new(SigAgentStream {
         receiver: Mutex::new(receiver),

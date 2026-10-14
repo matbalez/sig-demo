@@ -17,7 +17,15 @@ const route = {
   model: 'mesh-test-model',
   targetNodeId: 'a'.repeat(64),
 };
+const sessionEnvelope = {
+  accountId: 'local-account-a',
+  chatId: 'chat-a',
+  queryMessageId: 'question-a',
+  responseMessageId: 'answer-a',
+  sourceText: '@sig What is first?',
+};
 const meshRequest = {
+  ...sessionEnvelope,
   provider: 'mesh-llm',
   prompt: 'What is first?',
   ...route,
@@ -29,31 +37,45 @@ function mockAgent(events = [], options = {}) {
   const starts = [];
   const received = [];
   const lifecycle = { cancelled: 0, shutdown: 0, disposed: 0 };
-  let index = 0;
-  const stream = {
-    async nextEvent(signal) {
-      signal?.throwIfAborted();
-      const event = events[index];
-      index += 1;
-      return typeof event === 'function' ? event(signal) : (event ?? null);
-    },
-    cancel() {
-      lifecycle.cancelled += 1;
-    },
-    async shutdown() {
-      lifecycle.shutdown += 1;
-      await options.shutdown?.();
-    },
-    dispose() {
-      lifecycle.disposed += 1;
-    },
+  const sessionCreates = [];
+  let sessionDisposals = 0;
+  const makeStream = () => {
+    let index = 0;
+    return {
+      async nextEvent(signal) {
+        signal?.throwIfAborted();
+        const event = events[index];
+        index += 1;
+        return typeof event === 'function' ? event(signal) : (event ?? null);
+      },
+      cancel() {
+        lifecycle.cancelled += 1;
+      },
+      async shutdown() {
+        lifecycle.shutdown += 1;
+        await options.shutdown?.();
+      },
+      dispose() {
+        lifecycle.disposed += 1;
+      },
+    };
+  };
+  const start = async (config, request, signal) => {
+    signal.throwIfAborted();
+    starts.push({ config, request });
+    if (options.startError) throw options.startError;
+    return makeStream();
   };
   const runtime = createSigDemoAgentRuntime({
-    async start(config, request, signal) {
-      signal.throwIfAborted();
-      starts.push({ config, request });
-      if (options.startError) throw options.startError;
-      return stream;
+    start,
+    createSession(accountId, chatId) {
+      sessionCreates.push({ accountId, chatId });
+      return {
+        run: start,
+        dispose() {
+          sessionDisposals += 1;
+        },
+      };
     },
   });
   return {
@@ -61,6 +83,8 @@ function mockAgent(events = [], options = {}) {
     starts,
     received,
     lifecycle,
+    sessionCreates,
+    sessionDisposals: () => sessionDisposals,
     run: (
       request = meshRequest,
       credentials = {},
@@ -91,6 +115,7 @@ await test('forwards raw chat candidates to one native agent and streams its eve
     done,
   ]);
   const history = Array.from({ length: 20 }, (_, i) => ({
+    id: `history-${i}`,
     role: i % 2 ? 'assistant' : 'user',
     author: '🪿'.repeat(100),
     text: `Opening ${'x'.repeat(2000)} ending ${i}`,
@@ -146,7 +171,7 @@ await test('forwards raw chat candidates to one native agent and streams its eve
 await test('ChatGPT passes its credential only and never reads the Brave key', async () => {
   const runtime = mockAgent([text('Answer'), done]);
   await runtime.run(
-    { provider: 'chatgpt', prompt: 'Hi' },
+    { ...sessionEnvelope, provider: 'chatgpt', prompt: 'Hi' },
     {
       apiKey: 'synthetic-openai-key',
       get braveApiKey() {
@@ -203,6 +228,9 @@ await test('free warmup is a native mode with no TypeScript prompt or chat input
   );
   assert.deepEqual(runtime.starts[0].request, {
     mode: 'Warmup',
+    queryId: '',
+    responseId: '',
+    sourceText: '',
     prompt: '',
     author: undefined,
     history: [],
@@ -342,6 +370,7 @@ await test('invalid IPC shapes and oversized envelopes are rejected before nativ
     {
       ...meshRequest,
       history: Array.from({ length: 61 }, () => ({
+        id: 'history-id',
         role: 'user',
         author: 'Alice',
         text: 'Hi',
@@ -350,7 +379,12 @@ await test('invalid IPC shapes and oversized envelopes are rejected before nativ
     {
       ...meshRequest,
       history: [
-        { role: 'user', author: 'Alice', text: 'x'.repeat(4 * 1024 * 1024) },
+        {
+          id: 'history-id',
+          role: 'user',
+          author: 'Alice',
+          text: 'x'.repeat(4 * 1024 * 1024),
+        },
       ],
     },
   ]) {
@@ -388,4 +422,76 @@ await test('SDK diagnostic classification remains fixed for thrown and streamed 
     new SigDemoAgentRuntimeError('Safe message', secret).code,
     'application-error'
   );
+});
+
+await test('reuses one native session per local account and chat across provider changes', async () => {
+  const runtime = mockAgent([text('Answer'), done]);
+  await runtime.run();
+  await runtime.run({
+    ...meshRequest,
+    queryMessageId: 'question-b',
+    responseMessageId: 'answer-b',
+  });
+  await runtime.run(
+    { ...sessionEnvelope, provider: 'chatgpt', prompt: 'Hello' },
+    { apiKey: 'synthetic-openai-key' }
+  );
+  assert.deepEqual(runtime.sessionCreates, [
+    { accountId: 'local-account-a', chatId: 'chat-a' },
+  ]);
+  assert.equal(runtime.starts.length, 3);
+  assert.equal(runtime.lifecycle.shutdown, 3);
+  assert.equal(runtime.sessionDisposals(), 0);
+  assert.equal(
+    runtime.starts[0].request.queryId,
+    sessionEnvelope.queryMessageId
+  );
+  assert.equal(
+    runtime.starts[0].request.responseId,
+    sessionEnvelope.responseMessageId
+  );
+  assert.equal(
+    runtime.starts[0].request.sourceText,
+    sessionEnvelope.sourceText
+  );
+  assert.equal(runtime.starts[0].request.accountId, undefined);
+  assert.equal(runtime.starts[0].request.chatId, undefined);
+  runtime.disposeSessions();
+  assert.equal(runtime.sessionDisposals(), 1);
+});
+
+await test('keeps other chats and accounts separate and releases all handles on reset', async () => {
+  const runtime = mockAgent([done]);
+  await runtime.run();
+  await runtime.run({ ...meshRequest, chatId: 'chat-b' });
+  await runtime.run({ ...meshRequest, accountId: 'local-account-b' });
+  assert.deepEqual(runtime.sessionCreates, [
+    { accountId: 'local-account-a', chatId: 'chat-a' },
+    { accountId: 'local-account-a', chatId: 'chat-b' },
+    { accountId: 'local-account-b', chatId: 'chat-a' },
+  ]);
+  runtime.disposeSessions();
+  assert.equal(runtime.sessionDisposals(), 3);
+  await runtime.run();
+  assert.equal(runtime.sessionCreates.length, 4);
+  runtime.disposeSessions();
+  assert.equal(runtime.sessionDisposals(), 4);
+});
+
+await test('answers require stable session and source message identities before native calls', async () => {
+  const runtime = mockAgent([done]);
+  for (const key of [
+    'accountId',
+    'chatId',
+    'queryMessageId',
+    'responseMessageId',
+    'sourceText',
+  ]) {
+    const request = { ...meshRequest };
+    delete request[key];
+    // oxlint-disable-next-line no-await-in-loop
+    await assert.rejects(runtime.run(request), /Invalid agent session request/);
+  }
+  assert.equal(runtime.starts.length, 0);
+  assert.equal(runtime.sessionCreates.length, 0);
 });

@@ -59,10 +59,15 @@ await test('context stays in one chat and strictly before the query in timeline 
     message(96, { sent_at: now + 1000 }),
   ];
   assert.deepEqual(history(messages), [
-    { role: 'user', author: 'Alice', text: 'text 96' },
-    { role: 'user', author: 'Matty', text: 'text 97' },
-    { role: 'user', author: 'Alice', text: 'text 98' },
-    { role: 'user', author: 'Alice', text: 'text 100' },
+    { id: 'message-96', role: 'user', author: 'Alice', text: 'text 96' },
+    { id: 'message-97', role: 'user', author: 'Matty', text: 'text 97' },
+    { id: 'message-98', role: 'user', author: 'Alice', text: 'text 98' },
+    {
+      id: 'same-received-before',
+      role: 'user',
+      author: 'Alice',
+      text: 'text 100',
+    },
   ]);
   assert.deepEqual(
     history(messages, { query: { ...query, received_at: NaN } }),
@@ -110,8 +115,13 @@ await test('only ordinary text and completed Sig replies enter context', () => {
       message(89, { isTapToViewInvalid: true }),
     ]),
     [
-      { role: 'user', author: 'Alice', text: 'text 70' },
-      { role: 'assistant', author: 'Sig', text: 'We chose Friday.' },
+      { id: 'message-70', role: 'user', author: 'Alice', text: 'text 70' },
+      {
+        id: 'message-71',
+        role: 'assistant',
+        author: 'Sig',
+        text: 'We chose Friday.',
+      },
     ]
   );
   assert.equal(
@@ -120,6 +130,48 @@ await test('only ordinary text and completed Sig replies enter context', () => {
     1
   );
   assert.equal(history([message(90, { expireTimer: 30 })]).length, 1);
+});
+
+await test('stable record ids distinguish identical text and remain stable after edits', () => {
+  const first = message(80, { id: 'first-record', body: 'Same text' });
+  const second = message(81, { id: 'second-record', body: 'Same text' });
+  assert.deepEqual(
+    history([second, first]).map(entry => ({ id: entry.id, text: entry.text })),
+    [
+      { id: 'first-record', text: 'Same text' },
+      { id: 'second-record', text: 'Same text' },
+    ]
+  );
+  assert.deepEqual(
+    history([{ ...first, body: 'Edited text' }]).map(entry => ({
+      id: entry.id,
+      text: entry.text,
+    })),
+    [{ id: 'first-record', text: 'Edited text' }]
+  );
+  assert.equal(first.body, 'Same text');
+});
+
+await test('each snapshot removes records that have since expired or been deleted', () => {
+  const expiring = message(80, {
+    expireTimer: 30,
+    expirationStartTimestamp: now,
+  });
+  const retained = message(81);
+  assert.deepEqual(
+    history([expiring, retained]).map(entry => entry.id),
+    ['message-80', 'message-81']
+  );
+  assert.deepEqual(
+    history([expiring, retained], { now: now + 30_000 }).map(entry => entry.id),
+    ['message-81']
+  );
+  assert.deepEqual(
+    history([{ ...expiring, deletedForEveryone: true }, retained]).map(
+      entry => entry.id
+    ),
+    ['message-81']
+  );
 });
 
 await test('collects chronological candidates without applying the native twelve-message window', () => {

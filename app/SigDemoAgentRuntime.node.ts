@@ -5,7 +5,12 @@
 // Prompts, context selection, tools and inference continuation all live in Rust.
 import { Buffer } from 'node:buffer';
 import { z } from 'zod';
-import type { SigAgentBindings } from '../sig-demo/gdk/agent-bindings.node.ts';
+import type {
+  SigAgentBindings,
+  SigAgentConfig,
+  SigAgentRequest,
+  SigAgentStream,
+} from '../sig-demo/gdk/agent-bindings.node.ts';
 import {
   SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES,
   SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES,
@@ -23,6 +28,11 @@ export type SigDemoAgentRuntimeRequestType = Readonly<{
   mode?: 'answer' | 'warmup';
   prompt?: string;
   provider?: 'mesh-llm' | 'chatgpt';
+  accountId?: string;
+  chatId?: string;
+  queryMessageId?: string;
+  responseMessageId?: string;
+  sourceText?: string;
   author?: string;
   history?: ReadonlyArray<SigDemoAgentHistoryMessageType>;
   currentDate?: string;
@@ -57,11 +67,17 @@ export type SigDemoAgentRuntimeEventType =
   | Readonly<{ type: 'done' }>;
 
 type Output = (event: SigDemoAgentRuntimeEventType) => void;
+const localIdSchema = z.string().min(1).max(256);
 const requestSchema = z
   .object({
     mode: z.enum(['answer', 'warmup']).default('answer'),
     prompt: z.string().default(''),
     provider: z.enum(['mesh-llm', 'chatgpt']).default('chatgpt'),
+    accountId: localIdSchema.optional(),
+    chatId: localIdSchema.optional(),
+    queryMessageId: localIdSchema.optional(),
+    responseMessageId: localIdSchema.optional(),
+    sourceText: z.string().max(131_072).default(''),
     author: z
       .string()
       .refine(
@@ -73,6 +89,7 @@ const requestSchema = z
       .array(
         z
           .object({
+            id: localIdSchema,
             role: z.enum(['user', 'assistant']),
             author: z.string(),
             text: z.string(),
@@ -107,6 +124,7 @@ const timingPhaseSchema = z.enum([
 ]);
 
 export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
+  disposeSessions: () => void;
   runSigDemoAgent: (
     request: SigDemoAgentRuntimeRequestType,
     credentials: SigDemoAgentCredentialsType,
@@ -119,6 +137,18 @@ export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
     onTiming: (event: SigDemoAgentTimingEventType) => void
   ) => Promise<void>;
 }> {
+  // A native session owns Goose's conversation. This map owns only its handle.
+  // Keys are local bookkeeping and never become part of a model prompt.
+  const sessions = new Map<
+    string,
+    ReturnType<SigAgentBindings['createSession']>
+  >();
+  const disposeSessions = () => {
+    for (const session of sessions.values()) {
+      session.dispose();
+    }
+    sessions.clear();
+  };
   const runSigDemoAgent = async (
     input: SigDemoAgentRuntimeRequestType,
     credentials: SigDemoAgentCredentialsType,
@@ -133,6 +163,16 @@ export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
       throw new SigDemoAgentRuntimeError('Invalid agent request.');
     }
     const request = parsed.data;
+    if (
+      request.mode === 'answer' &&
+      (!request.accountId ||
+        !request.chatId ||
+        !request.queryMessageId ||
+        !request.responseMessageId ||
+        !request.sourceText)
+    ) {
+      throw new SigDemoAgentRuntimeError('Invalid agent session request.');
+    }
     const deadline = new AbortController();
     const timer = setTimeout(
       () => deadline.abort(),
@@ -142,28 +182,44 @@ export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
     try {
       signal.throwIfAborted();
       const mesh = request.provider === 'mesh-llm';
-      const stream = await agents.start(
-        {
-          provider: mesh ? 'MeshLlm' : 'Chatgpt',
-          model: request.model ?? SIG_DEMO_AGENT_MODEL,
-          baseUrl: request.baseUrl,
-          targetNodeId: request.targetNodeId,
-          apiKey: mesh ? undefined : credentials.apiKey,
-          braveApiKey: mesh ? credentials.braveApiKey : undefined,
-        },
-        {
-          mode: request.mode === 'warmup' ? 'Warmup' : 'Answer',
-          prompt: request.prompt,
-          author: request.author,
-          history: request.history.map(message => ({
-            role: message.role === 'assistant' ? 'Assistant' : 'User',
-            author: message.author,
-            text: message.text,
-          })),
-          currentDate: request.currentDate,
-        },
-        signal
-      );
+      const config: SigAgentConfig = {
+        provider: mesh ? 'MeshLlm' : 'Chatgpt',
+        model: request.model ?? SIG_DEMO_AGENT_MODEL,
+        baseUrl: request.baseUrl,
+        targetNodeId: request.targetNodeId,
+        apiKey: mesh ? undefined : credentials.apiKey,
+        braveApiKey: mesh ? credentials.braveApiKey : undefined,
+      };
+      const nativeRequest: SigAgentRequest = {
+        mode: request.mode === 'warmup' ? 'Warmup' : 'Answer',
+        queryId: request.queryMessageId ?? '',
+        responseId: request.responseMessageId ?? '',
+        sourceText: request.sourceText,
+        prompt: request.prompt,
+        author: request.author,
+        history: request.history.map(message => ({
+          id: message.id,
+          role: message.role === 'assistant' ? 'Assistant' : 'User',
+          author: message.author,
+          text: message.text,
+        })),
+        currentDate: request.currentDate,
+      };
+      let stream: SigAgentStream;
+      if (request.mode === 'warmup') {
+        stream = await agents.start(config, nativeRequest, signal);
+      } else {
+        // The validated answer envelope always supplies this account/chat pair.
+        const accountId = localIdSchema.parse(request.accountId);
+        const chatId = localIdSchema.parse(request.chatId);
+        const key = JSON.stringify([accountId, chatId]);
+        let session = sessions.get(key);
+        if (!session) {
+          session = agents.createSession(accountId, chatId);
+          sessions.set(key, session);
+        }
+        stream = await session.run(config, nativeRequest, signal);
+      }
       const cancel = () => stream.cancel();
       signal.addEventListener('abort', cancel, { once: true });
       try {
@@ -239,6 +295,7 @@ export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
     }
   };
   return {
+    disposeSessions,
     runSigDemoAgent,
     warmSigDemoMesh: (route, signal, onTiming) =>
       runSigDemoAgent(

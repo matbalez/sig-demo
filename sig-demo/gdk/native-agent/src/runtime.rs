@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 use std::collections::HashSet;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -33,18 +34,21 @@ use crate::brave::{BraveSearch, SearchArguments};
 use crate::compat_provider::CompatProvider;
 use crate::context::{ContextOperation, MESH_TOOLS, SYSTEM};
 use crate::errors::Failure;
+use crate::sessions::{search_excerpt, RetainedTurn};
 use crate::{
     SigAgentConfig, SigAgentEvent, SigAgentMode, SigAgentProvider, SigAgentRequest, SigAgentStatus,
 };
 
 #[derive(Clone)]
 pub(crate) struct Session {
-    conversation: Conversation,
+    id: String,
+    pub conversation: Conversation,
+    pub retained: Vec<RetainedTurn>,
 }
 
 impl MachineSession for Session {
     fn id(&self) -> &str {
-        "sig-request"
+        &self.id
     }
     fn conversation(&self) -> Option<&Conversation> {
         Some(&self.conversation)
@@ -53,6 +57,7 @@ impl MachineSession for Session {
 
 pub(crate) enum Effect {
     Conversation(ConversationEffect),
+    Retain(Vec<RetainedTurn>),
     Usage(ProviderUsage),
 }
 
@@ -74,14 +79,36 @@ impl InferenceEffect for Effect {
     }
 }
 
-struct Memory {
+pub(crate) struct Memory {
     session: Mutex<Session>,
+    gate: tokio::sync::Mutex<()>,
+}
+
+impl Default for Memory {
+    fn default() -> Self {
+        static NEXT_SESSION: AtomicU64 = AtomicU64::new(1);
+        Self {
+            session: Mutex::new(Session {
+                id: format!(
+                    "sig-session-{}",
+                    NEXT_SESSION.fetch_add(1, Ordering::Relaxed)
+                ),
+                conversation: Conversation::default(),
+                retained: Vec::new(),
+            }),
+            gate: tokio::sync::Mutex::new(()),
+        }
+    }
 }
 
 #[async_trait]
 impl SessionLoader<Session> for Memory {
-    async fn load(&self, _session_id: &str) -> Result<Session> {
-        Ok(self.session.lock().unwrap().clone())
+    async fn load(&self, session_id: &str) -> Result<Session> {
+        let session = self.session.lock().unwrap();
+        if session.id != session_id {
+            return Err(Failure::internal().into());
+        }
+        Ok(session.clone())
     }
 }
 
@@ -96,6 +123,7 @@ impl EffectHandler<Session, Effect> for Memory {
         let mut session = self.session.lock().unwrap();
         for effect in effects {
             match effect {
+                Effect::Retain(retained) => session.retained = retained.clone(),
                 Effect::Conversation(ConversationEffect::AppendMessage(message)) => {
                     session.conversation.push(message.clone())
                 }
@@ -138,6 +166,8 @@ struct Counts {
     seen: HashSet<String>,
     last_turn_text: bool,
     any_text: bool,
+    response: String,
+    search_context: Vec<serde_json::Value>,
 }
 
 struct Flow {
@@ -317,6 +347,14 @@ impl ToolProvider<Session> for BraveTools {
         self.flow.timing("search", started);
         self.flow.counts.lock().unwrap().completed_searches += 1;
         let failed = result.error.is_some();
+        if let Some(excerpt) = search_excerpt(&result) {
+            self.flow
+                .counts
+                .lock()
+                .unwrap()
+                .search_context
+                .push(excerpt);
+        }
         let mut result =
             CallToolResult::structured(serde_json::to_value(result).map_err(|_| invalid())?);
         result.is_error = Some(failed);
@@ -498,6 +536,19 @@ fn forward(event: AgentEvent, flow: &Flow) {
         for content in message.content {
             if let MessageContent::Text(text) = content {
                 if !text.text.is_empty() {
+                    // This is exactly the string concatenated into Signal's
+                    // completed reply; unsuccessful/oversized replies are not cached.
+                    let mut counts = flow.counts.lock().unwrap();
+                    if counts.response.len() <= 65_536 {
+                        if counts.response.len() + text.text.len() <= 65_536 {
+                            counts.response.push_str(&text.text);
+                        } else {
+                            // A fixed overflow marker prevents an unbounded
+                            // private cache without altering emitted text.
+                            counts.response = "x".repeat(65_537);
+                        }
+                    }
+                    drop(counts);
                     flow.emit(SigAgentEvent::Text { text: text.text });
                 }
             }
@@ -510,6 +561,7 @@ async fn answer(
     request: SigAgentRequest,
     flow: Arc<Flow>,
     cancel: CancellationToken,
+    memory: &Memory,
 ) -> Result<(), Failure> {
     let inner = provider(config)?;
     let mesh = config.provider == SigAgentProvider::MeshLlm;
@@ -523,9 +575,10 @@ async fn answer(
     } else {
         None
     };
-    answer_with_components(config, request, flow, cancel, inner, search).await
+    answer_in_memory(config, request, flow, cancel, inner, search, memory).await
 }
 
+#[cfg(test)]
 async fn answer_with_components(
     config: &SigAgentConfig,
     request: SigAgentRequest,
@@ -534,6 +587,28 @@ async fn answer_with_components(
     inner: Arc<dyn Provider>,
     search: Option<BraveSearch>,
 ) -> Result<(), Failure> {
+    answer_in_memory(
+        config,
+        request,
+        flow,
+        cancel,
+        inner,
+        search,
+        &Memory::default(),
+    )
+    .await
+}
+
+async fn answer_in_memory(
+    config: &SigAgentConfig,
+    request: SigAgentRequest,
+    flow: Arc<Flow>,
+    cancel: CancellationToken,
+    inner: Arc<dyn Provider>,
+    search: Option<BraveSearch>,
+    memory: &Memory,
+) -> Result<(), Failure> {
+    let completed_request = request.clone();
     let mesh = config.provider == SigAgentProvider::MeshLlm;
     let search = if mesh { search } else { None };
     let has_tools = search.is_some();
@@ -554,11 +629,7 @@ async fn answer_with_components(
         }));
     }
     let steps = vec![
-        Step::Operation(Arc::new(ContextOperation {
-            request,
-            mesh,
-            search_available: has_tools,
-        })),
+        Step::Operation(Arc::new(ContextOperation::new(request, mesh, has_tools))),
         Step::Operation(Arc::new(Boundaries {
             flow: Arc::clone(&flow),
             tools: has_tools,
@@ -570,15 +641,11 @@ async fn answer_with_components(
         ))),
     ];
     let machine = StateMachine::new(steps, cancel.clone());
-    let memory = Memory {
-        session: Mutex::new(Session {
-            conversation: Conversation::default(),
-        }),
-    };
     let (tx, mut rx) = mpsc::unbounded_channel();
     let emit = Emitter::new(tx, cancel.clone());
     let result = {
-        let run = machine.run(&memory, "sig-request", &emit);
+        let session_id = memory.session.lock().unwrap().id.clone();
+        let run = machine.run(memory, &session_id, &emit);
         tokio::pin!(run);
         loop {
             tokio::select! {
@@ -597,7 +664,7 @@ async fn answer_with_components(
     if let Some(failure) = flow.failure() {
         return Err(failure);
     }
-    result.map_err(|error| {
+    let completed_session = result.map_err(|error| {
         error
             .downcast_ref::<Failure>()
             .cloned()
@@ -605,6 +672,40 @@ async fn answer_with_components(
     })?;
     if !flow.counts.lock().unwrap().last_turn_text {
         return Err(Failure::empty());
+    }
+    let completed = {
+        let counts = flow.counts.lock().unwrap();
+        completed_session
+            .conversation
+            .messages()
+            .iter()
+            .rev()
+            .find(|message| {
+                message.role == rmcp::model::Role::Assistant && message.error_kind().is_none()
+            })
+            .and_then(|assistant| {
+                RetainedTurn::completed(
+                    &completed_request,
+                    counts.response.clone(),
+                    counts.search_context.clone(),
+                    assistant.clone(),
+                )
+            })
+    };
+    if let Some(turn) = completed {
+        let session = memory.session.lock().unwrap().clone();
+        let mut retained = session.retained.clone();
+        retained.retain(|prior| {
+            prior.query_id != turn.query_id && prior.response_id != turn.response_id
+        });
+        retained.push(turn);
+        if retained.len() > 12 {
+            retained.remove(0);
+        }
+        memory
+            .apply_effects(&session, &mut [Effect::Retain(retained)], &emit)
+            .await
+            .map_err(|_| Failure::internal())?;
     }
     flow.timing("answer", flow.started);
     Ok(())
@@ -618,6 +719,9 @@ async fn warmup(
     if config.provider != SigAgentProvider::MeshLlm
         || config.target_node_id.is_none()
         || !request.prompt.is_empty()
+        || !request.query_id.is_empty()
+        || !request.response_id.is_empty()
+        || !request.source_text.is_empty()
         || request.author.is_some()
         || !request.history.is_empty()
         || request.current_date.is_some()
@@ -651,6 +755,7 @@ pub(crate) async fn run(
     request: SigAgentRequest,
     events: mpsc::UnboundedSender<SigAgentEvent>,
     cancel: CancellationToken,
+    memory: Arc<Memory>,
 ) {
     let warm = request.mode == SigAgentMode::Warmup;
     let flow = Arc::new(Flow {
@@ -669,7 +774,11 @@ pub(crate) async fn run(
         if warm {
             warmup(&config, &request, &flow).await
         } else {
-            answer(&config, request, Arc::clone(&flow), cancel.clone()).await
+            // A fresh state machine/provider/Flow uses the owned persistent
+            // session. The native lease serializes all runs on this handle;
+            // TypeScript only retains the handle and forwards events.
+            let _lease = memory.gate.lock().await;
+            answer(&config, request, Arc::clone(&flow), cancel.clone(), &memory).await
         }
     };
     let result = tokio::select! {

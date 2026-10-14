@@ -232,7 +232,21 @@ export async function invokeSigDemoAgent(
     }
     // Supply eligible records; the native Goose agent owns context and prompts.
     await streamSigDemoAgent(
-      { requestId: queryId, prompt, author, history },
+      {
+        requestId: queryId,
+        accountId: originAci,
+        chatId: conversation.id,
+        queryMessageId: query.id,
+        responseMessageId: getSigDemoAgentBubbleId(
+          conversation.id,
+          originAci,
+          queryId
+        ),
+        sourceText: query.body ?? '',
+        prompt,
+        author,
+        history,
+      },
       delta => {
         const hadPlaceholder = Boolean(placeholder);
         placeholder = '';
