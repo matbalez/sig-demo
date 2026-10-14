@@ -30,6 +30,7 @@ import {
 } from './SigDemoBrave.node.ts';
 import {
   safeSigDemoAgentError,
+  sigDemoAgentErrorCode,
   SigDemoAgentRuntimeError,
 } from './SigDemoAgentErrors.std.ts';
 import { ToolTextFilter } from './SigDemoToolCompat.node.ts';
@@ -415,7 +416,10 @@ async function withRequestDeadline<T>(
           : "Sig's request timed out. Try again."
       );
     }
-    throw new SigDemoAgentRuntimeError(safeSigDemoAgentError(error));
+    throw new SigDemoAgentRuntimeError(
+      safeSigDemoAgentError(error),
+      sigDemoAgentErrorCode(error)
+    );
   } finally {
     clearTimeout(timer);
   }
@@ -585,7 +589,8 @@ export function createSigDemoAgentRuntime(gdk: GdkBindings): Readonly<{
                     break;
                   case 'ErrorChunk':
                     throw new SigDemoAgentRuntimeError(
-                      safeSigDemoAgentError(chunk.error)
+                      safeSigDemoAgentError(chunk.error),
+                      sigDemoAgentErrorCode(chunk.error)
                     );
                   case 'EndChunk':
                     ended = true;

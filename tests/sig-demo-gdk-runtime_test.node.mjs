@@ -14,7 +14,11 @@ import {
   truncateUtf8,
 } from '../app/SigDemoBrave.node.ts';
 import { ToolTextFilter } from '../app/SigDemoToolCompat.node.ts';
-import { safeSigDemoAgentError } from '../app/SigDemoAgentErrors.std.ts';
+import {
+  safeSigDemoAgentError,
+  sigDemoAgentErrorCode,
+  SigDemoAgentRuntimeError,
+} from '../app/SigDemoAgentErrors.std.ts';
 
 const { AbortController, DOMException, Response, structuredClone } = globalThis;
 
@@ -545,6 +549,204 @@ await test('SDK startup and midstream errors expose only classified messages', a
       'private'
     )
   );
+});
+
+await test('thrown and streamed SDK diagnostics receive fixed codes and never expose payloads', () => {
+  const secret = 'private-key-and-private-chat-and-node-address';
+  const fixtures = [
+    ['RateLimited', secret, 'rate-limited', 'Sig is busy. Try again shortly.'],
+    [
+      'OutputTokenLimitExceeded',
+      secret,
+      'output-token-limit',
+      "Sig's response exceeded the output limit.",
+    ],
+    [
+      'ContextLengthExceeded',
+      secret,
+      'context-length',
+      'The submitted message is too long for this model.',
+    ],
+    [
+      'Authentication',
+      secret,
+      'authentication',
+      "Sig's API credential was rejected.",
+    ],
+    ['Timeout', secret, 'timeout', "Sig's request timed out. Try again."],
+    [
+      'ProviderUnavailable',
+      `Network error: ${secret}`,
+      'provider-unavailable',
+      "Sig's model provider is unavailable.",
+    ],
+    [
+      'Generic',
+      `model_not_found ${secret}`,
+      'model-unavailable',
+      'The configured Sig model is unavailable for this API key.',
+    ],
+    [
+      'Generic',
+      `The model does not exist: ${secret}`,
+      'model-unavailable',
+      'The configured Sig model is unavailable for this API key.',
+    ],
+    [
+      'Generic',
+      `-32602: The model produced malformed tool arguments. ${secret}`,
+      'tool-arguments-invalid',
+      'The inference provider returned an invalid web search request. Please try again.',
+    ],
+    [
+      'Generic',
+      `-32602: Tool arguments for ${secret} must be a JSON object`,
+      'tool-arguments-invalid',
+      'The inference provider returned an invalid web search request. Please try again.',
+    ],
+    [
+      'Generic',
+      `-32602: Could not interpret tool use parameters for id ${secret}`,
+      'tool-arguments-invalid',
+      'The inference provider returned an invalid web search request. Please try again.',
+    ],
+    [
+      'Generic',
+      `-32602: The model's response was truncated — it hit the output token limit while generating this tool call. ${secret}`,
+      'tool-arguments-incomplete',
+      'The inference provider returned an invalid web search request. Please try again.',
+    ],
+    [
+      'Generic',
+      `Network error: Stream decode error: Failed to parse streaming chunk: invalid type: map, expected a string: ${secret}`,
+      'stream-format-invalid',
+      'The inference provider returned an unreadable response. Please try again.',
+    ],
+    [
+      'Generic',
+      `Network error: Stream decode error: Failed to parse streaming chunk: missing field function: ${secret}`,
+      'stream-format-invalid',
+      'The inference provider returned an unreadable response. Please try again.',
+    ],
+    [
+      'Generic',
+      `Network error: Stream decode error: error decoding response body ${secret}`,
+      'stream-interrupted',
+      'The inference connection closed before Sig finished. Please try again.',
+    ],
+    [
+      'Generic',
+      `Network error: Could not connect to ${secret}`,
+      'network-connect',
+      'Sig could not connect to the inference provider. Try again.',
+    ],
+    [
+      'Generic',
+      `Network error: ${secret}`,
+      'network-error',
+      "Sig's connection to the inference provider failed. Try again.",
+    ],
+    [
+      'Generic',
+      secret,
+      'generic',
+      'Sig could not complete the request. Try again.',
+    ],
+  ];
+  for (const [kind, diagnostic, code, message] of fixtures) {
+    for (const field of ['details', 'message']) {
+      const error = { kind, [field]: diagnostic };
+      assert.equal(sigDemoAgentErrorCode(error), code);
+      assert.equal(safeSigDemoAgentError(error), message);
+      const wrapped = new SigDemoAgentRuntimeError(
+        safeSigDemoAgentError(error),
+        sigDemoAgentErrorCode(error)
+      );
+      const wrappedAgain = new SigDemoAgentRuntimeError(
+        safeSigDemoAgentError(wrapped),
+        sigDemoAgentErrorCode(wrapped)
+      );
+      assert.equal(sigDemoAgentErrorCode(wrappedAgain), code);
+      assert.equal(safeSigDemoAgentError(wrappedAgain), message);
+      assert.ok(!JSON.stringify({ code, message }).includes(secret));
+    }
+  }
+});
+
+await test('unknown SDK shapes and untyped diagnostic codes cannot enter logs or replies', () => {
+  const secret = 'private-key-and-private-chat';
+  for (const error of [
+    new Error(secret),
+    { kind: secret, message: secret, code: secret },
+    { kind: 'Generic', details: 42, message: secret },
+    { details: secret },
+    secret,
+    null,
+    undefined,
+  ]) {
+    assert.equal(sigDemoAgentErrorCode(error), 'generic');
+    assert.equal(
+      safeSigDemoAgentError(error),
+      'Sig could not complete the request. Try again.'
+    );
+  }
+  const trusted = new SigDemoAgentRuntimeError('A safe application error.');
+  assert.equal(sigDemoAgentErrorCode(trusted), 'application-error');
+  assert.equal(safeSigDemoAgentError(trusted), 'A safe application error.');
+  const untyped = new SigDemoAgentRuntimeError(
+    'A safe application error.',
+    secret
+  );
+  assert.equal(untyped.code, 'application-error');
+  assert.equal(sigDemoAgentErrorCode(untyped), 'application-error');
+});
+
+await test('SDK diagnostic codes survive startup and ErrorChunk runtime wrapping', async () => {
+  const cases = [
+    [
+      'stream-format-invalid',
+      'Network error: Stream decode error: Failed to parse streaming chunk: private payload',
+    ],
+    [
+      'stream-interrupted',
+      'Network error: Stream decode error: error decoding response body private payload',
+    ],
+    [
+      'tool-arguments-invalid',
+      '-32602: The model produced malformed tool arguments. private payload',
+    ],
+  ];
+  for (const [code, diagnostic] of cases) {
+    for (const stage of ['startup', 'stream']) {
+      const sdkFailure = {
+        kind: 'Generic',
+        [stage === 'startup' ? 'details' : 'message']: diagnostic,
+      };
+      const runtime = mockGdk(
+        stage === 'startup'
+          ? [sdkFailure]
+          : [[{ kind: 'ErrorChunk', error: sdkFailure }]]
+      );
+      // Each assertion owns an isolated fake SDK/runtime and request.
+      // oxlint-disable-next-line no-await-in-loop
+      await assert.rejects(runtime.run(), error => {
+        assert.ok(error instanceof SigDemoAgentRuntimeError);
+        assert.equal(error.code, code);
+        assert.equal(sigDemoAgentErrorCode(error), code);
+        assert.ok(!error.message.includes('private payload'));
+        return true;
+      });
+      assert.equal(runtime.calls.length, 1);
+      assert.deepEqual(runtime.disposed, {
+        provider: 1,
+        streams: stage === 'startup' ? 0 : 1,
+      });
+      assert.equal(
+        runtime.events.some(event => event.type === 'done'),
+        false
+      );
+    }
+  }
 });
 
 await test('cancelling an active native stream disposes it and never emits done or a continuation', async () => {

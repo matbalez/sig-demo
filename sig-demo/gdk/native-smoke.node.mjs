@@ -237,7 +237,7 @@ const server = createServer(async (request, response) => {
                       type: 'function',
                       function: {
                         name: 'google_search',
-                        arguments: '{"query":"synthetic ',
+                        arguments: '{',
                       },
                       extra_content: {
                         google: { thought_signature: 'synthetic-signature' },
@@ -249,6 +249,17 @@ const server = createServer(async (request, response) => {
               },
             ],
           },
+          // Paid mesh inserts billing progress between tool argument fragments.
+          // This is not the tool's finish signal, even though choices is empty.
+          {
+            model: body.model,
+            choices: [],
+            usage: {
+              prompt_tokens: 0,
+              completion_tokens: 11,
+              total_tokens: 11,
+            },
+          },
           {
             model: body.model,
             choices: [
@@ -256,7 +267,10 @@ const server = createServer(async (request, response) => {
                 index: 0,
                 delta: {
                   tool_calls: [
-                    { index: 0, function: { arguments: 'search"}' } },
+                    {
+                      index: 0,
+                      function: { arguments: '"query":"synthetic search"}' },
+                    },
                   ],
                 },
                 finish_reason: null,
@@ -468,6 +482,11 @@ try {
     );
     const tool = toolChunks.find(chunk => chunk.kind === 'ToolChunk');
     assert.equal(
+      toolChunks.filter(chunk => chunk.kind === 'ErrorChunk').length,
+      0,
+      'Intermediate billing usage must not terminate a tool call.'
+    );
+    assert.equal(
       toolChunks.filter(chunk => chunk.kind === 'ToolChunk').length,
       1
     );
@@ -475,6 +494,9 @@ try {
     assert.deepEqual(JSON.parse(tool.argumentsJson), {
       query: 'synthetic search',
     });
+    const toolUsage = toolChunks.find(chunk => chunk.kind === 'EndChunk').usage;
+    assert.equal(toolUsage.inputTokens, 10);
+    assert.equal(toolUsage.outputTokens, 5);
     assert.equal(
       JSON.parse(tool.providerMetadataJson).extra_content.google
         .thought_signature,

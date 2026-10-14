@@ -1438,9 +1438,10 @@ where
                                     if tool_chunk.choices[0].finish_reason.is_some() {
                                         done = true;
                                     }
-                                } else {
-                                    done = true;
                                 }
+                                // Paid mesh streams interleave usage-only frames
+                                // before the remaining tool argument deltas. Keep
+                                // assembling until an actual finish_reason.
                             }
                         } else {
                             break;
@@ -5348,6 +5349,81 @@ data: [DONE]"#;
         assert_eq!(spec[0]["reasoning_content"], "think once");
         assert_eq!(spec[0]["tool_calls"][0]["function"]["name"], "test_tool");
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_streaming_tool_call_survives_intermediate_usage() -> anyhow::Result<()> {
+        // Paid mesh nodes report committed output tokens between argument deltas.
+        // The same metadata must not hide a later real output-token-limit signal.
+        for finish_reason in ["tool_calls", "length"] {
+            let frames = [
+                json!({
+                    "id": "usage-test-response", "model": "usage-test-model",
+                    "choices": [{"index": 0, "delta": {"tool_calls": [{
+                        "index": 0, "id": "usage-test-call", "type": "function",
+                        "function": {"name": "brave_web_search", "arguments": "{"},
+                        "extra_content": {"google": {"thought_signature": "usage-test-signature"}}
+                    }]}, "finish_reason": null}]
+                }),
+                json!({
+                    "choices": [],
+                    "usage": {"prompt_tokens": 0, "completion_tokens": 11, "total_tokens": 11}
+                }),
+                json!({
+                    "choices": [{"index": 0, "delta": {"tool_calls": [{
+                        "index": 0, "function": {"arguments": "\"query\":\"synthetic search\"}"}
+                    }]}, "finish_reason": finish_reason}]
+                }),
+            ];
+            let lines = frames
+                .into_iter()
+                .map(|frame| Ok(format!("data: {frame}")))
+                .chain(std::iter::once(Ok("data: [DONE]".to_string())));
+            let response_stream = tokio_stream::iter(lines);
+            let mut messages = std::pin::pin!(response_to_streaming_message(response_stream));
+            let mut tool_count = 0;
+            let mut usage_count = 0;
+            while let Some(result) = messages.next().await {
+                let (message, usage) = result?;
+                if let Some(usage) = usage {
+                    assert_eq!(usage.usage.output_tokens, Some(11));
+                    usage_count += 1;
+                }
+                if let Some(message) = message {
+                    assert_eq!(
+                        message.metadata.output_token_limit_reached,
+                        finish_reason == "length"
+                    );
+                    for content in message.content {
+                        if let MessageContentBlock::ToolRequest(request) = content {
+                            tool_count += 1;
+                            assert_eq!(request.id, "usage-test-call");
+                            assert_eq!(request.provider_index(), Some(0));
+                            let metadata = request.metadata.as_ref().unwrap();
+                            assert_eq!(
+                                metadata["extra_content"]["google"]["thought_signature"],
+                                "usage-test-signature"
+                            );
+                            if finish_reason == "length" {
+                                let error = request
+                                    .tool_call
+                                    .expect_err("a truncated tool call must not execute");
+                                assert!(error.message.contains("output token limit"));
+                            } else {
+                                let call = request
+                                    .tool_call
+                                    .expect("all argument fragments must be assembled");
+                                assert_eq!(call.name.as_ref(), "brave_web_search");
+                                assert_eq!(call.arguments.unwrap()["query"], "synthetic search");
+                            }
+                        }
+                    }
+                }
+            }
+            assert_eq!(tool_count, 1);
+            assert_eq!(usage_count, 1);
+        }
         Ok(())
     }
 

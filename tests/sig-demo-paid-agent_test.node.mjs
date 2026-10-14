@@ -6,6 +6,7 @@ import { registerHooks } from 'node:module';
 import process from 'node:process';
 import { test } from 'node:test';
 import { setImmediate } from 'node:timers';
+import { SigDemoAgentRuntimeError } from '../app/SigDemoAgentErrors.std.ts';
 
 const harnessKey = '__sigDemoPaidAgentTestHarness';
 const freeRoute = {
@@ -64,7 +65,12 @@ const stubs = new Map([
       stop() { globalThis.${harnessKey}.record('mesh-stop'); }
     }`,
   ],
-  ['log.std.ts', 'export const createLogger = () => ({ info() {} })'],
+  [
+    'log.std.ts',
+    `export const createLogger = () => ({
+      info: (...args) => globalThis.${harnessKey}.log(...args),
+    })`,
+  ],
   ['drop.std.ts', 'export const drop = promise => { promise.catch(() => {}) }'],
 ]);
 const hooks = registerHooks({
@@ -101,6 +107,7 @@ function createHarness() {
   const calls = [];
   const fundCalls = [];
   const events = [];
+  const logs = [];
   const mainFrame = {};
   const sender = {
     mainFrame,
@@ -122,6 +129,8 @@ function createHarness() {
     calls,
     fundCalls,
     events,
+    logs,
+    log: (...args) => logs.push(args),
     sender,
     event,
     snapshot,
@@ -234,6 +243,52 @@ process.env.OPENAI_API_KEY = 'ambient-openai-test-key';
 process.env.BRAVE_SEARCH_API_KEY = 'ambient-brave-test-key';
 
 try {
+  await test('native failures log a fixed code and stage without SDK diagnostics', async () => {
+    const harness = createHarness();
+    try {
+      harness.run = async (request, credentials, signal, output) => {
+        output({ type: 'timing', phase: 'model-turn', durationMs: 0 });
+        throw new SigDemoAgentRuntimeError(
+          'The inference node returned an unreadable response. Please try again.',
+          'stream-format-invalid'
+        );
+      };
+      await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
+      assert.deepEqual(
+        await harness.invoke('sig-demo-agent:start', question('mesh-llm-paid')),
+        { ok: true }
+      );
+      await tick();
+      const failure = harness.logs.find(
+        ([message]) => message === 'Inference request failed'
+      );
+      assert.deepEqual(failure?.[1], {
+        provider: 'mesh-llm-paid',
+        phase: 'model-turn',
+        modelTurns: 1,
+        errorCode: 'stream-format-invalid',
+      });
+      const logged = JSON.stringify(harness.logs);
+      for (const privateValue of [
+        fakeBraveKey,
+        fakeOpenAIKey,
+        'arithmetic',
+        '2 + 3',
+      ]) {
+        assert.ok(!logged.includes(privateValue));
+      }
+      assert.equal(harness.calls.length, 0);
+      assert.ok(
+        harness.events.some(
+          ({ value }) =>
+            value.type === 'error' &&
+            value.message.includes('unreadable response')
+        )
+      );
+    } finally {
+      harness.cleanup();
+    }
+  });
   await test('paid provider configuration connects without invoking a native GDK warmup', async () => {
     const harness = createHarness();
     try {

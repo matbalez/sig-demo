@@ -27,7 +27,10 @@ import { drop } from '../ts/util/drop.std.ts';
 import { createLogger } from '../ts/logging/log.std.ts';
 import { loadGdk } from '../sig-demo/gdk/bindings.node.ts';
 import { createSigDemoAgentRuntime } from './SigDemoAgentRuntime.node.ts';
-import { safeSigDemoAgentError } from './SigDemoAgentErrors.std.ts';
+import {
+  safeSigDemoAgentError,
+  sigDemoAgentErrorCode,
+} from './SigDemoAgentErrors.std.ts';
 
 const log = createLogger('SigDemoAgent');
 
@@ -415,6 +418,7 @@ export function setupSigDemoAgent(
     let completed = false;
     let receivedText = false;
     let modelTurns = 0;
+    let lastPhase = 'runtime-starting';
     const finish = (message?: string) => {
       if (completed) {
         return;
@@ -468,6 +472,7 @@ export function setupSigDemoAgent(
             } else if (chunk.type === 'status') {
               send({ requestId, type: 'status', status: chunk.status });
             } else if (chunk.type === 'timing') {
+              lastPhase = chunk.phase;
               if (chunk.phase === 'model-turn') {
                 modelTurns += 1;
               }
@@ -490,6 +495,14 @@ export function setupSigDemoAgent(
         );
       } catch (error) {
         // Native/provider diagnostics may contain prompts or credentials.
+        log.info('Inference request failed', {
+          provider,
+          phase: lastPhase,
+          modelTurns,
+          errorCode: controller.signal.aborted
+            ? 'cancelled'
+            : sigDemoAgentErrorCode(error),
+        });
         finish(
           controller.signal.aborted
             ? 'Sig stopped before completing its response.'

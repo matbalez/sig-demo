@@ -1,4 +1,6 @@
 Upstream: goose-provider-types 0.1.0-alpha.12, Apache-2.0.
 Source: https://github.com/aaif-goose/goose/tree/4811ae25f736fdf0ede847449c060e96645426b5/crates/goose-provider-types
 
-Sig Demo adds a narrow `web_search: true` model request parameter that enables the OpenAI Responses built-in web_search tool, permits its output items, and exposes HTTP(S) source citations after streamed answer text. Other provider behavior stays upstream. This parameter is a local compatibility patch, not an official Goose SDK API.
+Sig Demo adds a narrow `web_search: true` model request parameter that enables the OpenAI Responses built-in web_search tool, permits its output items, and exposes HTTP(S) source citations after streamed answer text. This parameter is a local compatibility patch, not an official Goose SDK API.
+
+The Chat Completions stream parser also keeps assembling tool arguments across intermediate usage-only frames (`choices: []`). Paid mesh nodes emit these frames for payment accounting before the tool call is complete. Tool identifiers, metadata, and real output-token-limit handling remain unchanged. Other provider behavior stays upstream.

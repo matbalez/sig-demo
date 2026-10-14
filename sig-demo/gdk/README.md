@@ -14,9 +14,10 @@ The agent's TypeScript runtime uses native GDK providers and streams directly.
 
 - `native/Cargo.toml` pins the real SDK dependency. `build-native.sh` builds the
   SDK package's existing `cdylib`, rather than defining new Rust exports.
-- `native/vendor/goose-provider-types` retains the small formatter patch for
-  OpenAI Responses built-in web search and citations. Its notice describes the
-  patch; native GDK owns provider requests and response parsing.
+- `native/vendor/goose-provider-types` retains the small formatter patches for
+  OpenAI Responses built-in web search/citations and paid mesh streams that
+  interleave usage reports while generating tool arguments. Its notice describes
+  the patches; native GDK owns provider requests and response parsing.
 - `bindgen/src/main.rs` uses official `uniffi_bindgen` library metadata extraction
   to read the compiled SDK's interface. `generated/schema.json` contains the
   exact exported C symbols, interface checksums, fields, variants, and defaults.
