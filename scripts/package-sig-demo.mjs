@@ -21,13 +21,14 @@ const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
 if (args.includes('--help')) {
   console.log(
-    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE]\nBuilds sig demo with its Rust chat helper, mesh-llm sidecar, and approved burner credential; no publishing or notarization.'
+    'Usage: node scripts/package-sig-demo.mjs [--config FILE] [--arch arm64] [--agent-key-file FILE] [--brave-key-file FILE]\nBuilds sig demo with its Rust chat helper, mesh-llm sidecar, and approved demo credentials; no publishing or notarization.'
   );
   process.exit(0);
 }
 let configPath = resolve(root, '.sig-demo/client.json');
 let arch = process.arch;
 let agentKeyPath = resolve(root, '.sig-demo/agent.env');
+let braveKeyPath = resolve(root, '.sig-demo/brave.env');
 for (let index = 0; index < args.length; index += 1) {
   if (args[index] === '--config' && args[index + 1]) {
     configPath = resolve(args[index + 1]);
@@ -37,6 +38,9 @@ for (let index = 0; index < args.length; index += 1) {
     index += 1;
   } else if (args[index] === '--agent-key-file' && args[index + 1]) {
     agentKeyPath = resolve(args[index + 1]);
+    index += 1;
+  } else if (args[index] === '--brave-key-file' && args[index + 1]) {
+    braveKeyPath = resolve(args[index + 1]);
     index += 1;
   } else {
     throw new Error(`Unknown or incomplete argument: ${args[index]}`);
@@ -121,6 +125,30 @@ if (
 if (!apiKey.startsWith('sk-') || /\s/.test(apiKey)) {
   throw new Error('The approved Sig burner credential file is unusable.');
 }
+if (
+  !existsSync(braveKeyPath) ||
+  !lstatSync(braveKeyPath).isFile() ||
+  lstatSync(braveKeyPath).isSymbolicLink()
+) {
+  throw new Error('The approved Sig Brave credential file is missing.');
+}
+const braveKeyMatch = readFileSync(braveKeyPath, 'utf8').match(
+  /^\s*(?:export\s+)?BRAVE_SEARCH_API_KEY\s*=\s*(.*?)\s*$/m
+);
+let braveApiKey = braveKeyMatch?.[1] ?? '';
+if (
+  (braveApiKey.startsWith('"') && braveApiKey.endsWith('"')) ||
+  (braveApiKey.startsWith("'") && braveApiKey.endsWith("'"))
+) {
+  braveApiKey = braveApiKey.slice(1, -1);
+}
+if (
+  !braveApiKey ||
+  braveApiKey.length > 1024 ||
+  !/^[\u0021-\u007e]+$/.test(braveApiKey)
+) {
+  throw new Error('The approved Sig Brave credential file is unusable.');
+}
 const agentArchitecture = spawnSync(
   '/usr/bin/lipo',
   ['-archs', agentBinaryPath],
@@ -143,9 +171,15 @@ const buildRoot = mkdtempSync(join(tmpdir(), 'sig-demo-build-'));
 const agentResources = resolve(buildRoot, 'sig-demo-agent');
 mkdirSync(agentResources, { mode: 0o700 });
 copyFileSync(agentBinaryPath, resolve(agentResources, 'sig-demo-agent'));
+for (const name of ['LICENSE', 'NOTICE', 'SIG_DEMO_PATCH.md']) {
+  copyFileSync(
+    resolve(root, 'sig-demo/agent/vendor/goose-provider-types', name),
+    resolve(agentResources, `GDK-${name}`)
+  );
+}
 writeFileSync(
   resolve(agentResources, 'runtime.json'),
-  `${JSON.stringify({ apiKey, model: 'gpt-6-luna' })}\n`,
+  `${JSON.stringify({ apiKey, braveApiKey, model: 'gpt-6-luna' })}\n`,
   { mode: 0o600 }
 );
 const builderConfigPath = resolve(buildRoot, 'builder-config.json');

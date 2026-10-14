@@ -12141,6 +12141,14 @@
     "messageformat": "Sig is responding…",
     "description": "Status while the virtual Sig chat assistant streams a reply"
   },
+  "icu:SigDemoAgent--connecting": {
+    "messageformat": "Connecting to mesh…",
+    "description": "Status while the Sig chat assistant connects to an inference node"
+  },
+  "icu:SigDemoAgent--searching": {
+    "messageformat": "Searching the web…",
+    "description": "Status while the Sig chat assistant searches the web"
+  },
   "icu:SigDemoAgent--error": {
     "messageformat": "Sig could not finish this reply.",
     "description": "Status when the virtual Sig chat assistant fails to finish a reply"
@@ -12150,7 +12158,7 @@
     "description": "General setting to choose the provider for the Sig chat assistant"
   },
   "icu:SigDemoAgent--inference-description": {
-    "messageformat": "Choose what powers Sig on this Mac. Only questions sent with @sig are shared with the selected provider.",
+    "messageformat": "Choose what powers Sig on this Mac. Your @sig question and up to 12 recent text messages from that chat are shared with the selected provider. Mesh web search queries are sent to Brave; ChatGPT uses OpenAI web search.",
     "description": "Description of the per-device inference setting for Sig"
   }
 }

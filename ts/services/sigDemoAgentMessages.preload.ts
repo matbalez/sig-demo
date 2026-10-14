@@ -7,7 +7,7 @@ import { MessageModel } from '../models/messages.preload.ts';
 import { getMessageById } from '../messages/getMessageById.preload.ts';
 import { ReadStatus } from '../messages/MessageReadStatus.std.ts';
 import { SeenStatus } from '../MessageSeenStatus.std.ts';
-import { DataWriter } from '../sql/Client.preload.ts';
+import { DataReader, DataWriter } from '../sql/Client.preload.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
 import { conversationJobQueue } from '../jobs/conversationJobQueue.preload.ts';
 import type { AciString } from '../types/ServiceId.std.ts';
@@ -27,8 +27,67 @@ import {
 } from '../util/whatTypeOfConversation.dom.ts';
 import { drop } from '../util/drop.std.ts';
 import { streamSigDemoAgent } from './sigDemoAgentClient.preload.ts';
+import {
+  buildSigDemoAgentHistory,
+  normalizeSigDemoAgentAuthor,
+} from '../util/sigDemoAgentContext.std.ts';
+import { hasNumberTitle } from '../util/getTitle.preload.ts';
+import type { SigDemoAgentHistoryMessageType } from '../types/SigDemoAgent.std.ts';
+import { createLogger } from '../logging/log.std.ts';
 
+const log = createLogger('sig demo context');
 let lastTransportTimestamp = 0;
+
+function getHumanAuthor(message: MessageAttributesType): string {
+  const contact =
+    message.type === 'outgoing'
+      ? window.ConversationController.getOurConversationOrThrow()
+      : window.ConversationController.get(message.sourceServiceId);
+  const unknown = window.SignalContext.i18n('icu:unknownContact');
+  if (!contact) {
+    return unknown;
+  }
+  // Signal's normal title fallback can be a phone number. Use display names or
+  // usernames for agent context; never send a raw account or phone identifier.
+  return hasNumberTitle(contact.attributes)
+    ? contact.get('username') || unknown
+    : contact.getTitle();
+}
+
+async function snapshotSigDemoAgentHistory(
+  conversation: ConversationModel,
+  query: MessageAttributesType
+): Promise<Array<SigDemoAgentHistoryMessageType>> {
+  if (!Number.isFinite(query.received_at) || !Number.isFinite(query.sent_at)) {
+    log.warn(
+      'Recent Sig context omitted because the timeline cursor is missing'
+    );
+    return [];
+  }
+  try {
+    const messages = await DataReader.getOlderMessagesByConversation({
+      conversationId: conversation.id,
+      messageId: query.id,
+      receivedAt: query.received_at,
+      sentAt: query.sent_at,
+      limit: 60,
+      includeStoryReplies: false,
+      storyId: undefined,
+    });
+    return buildSigDemoAgentHistory({
+      messages,
+      query,
+      getAuthor: getHumanAuthor,
+      now: Date.now(),
+    });
+  } catch {
+    // History is optional; do not log chat text, names, IDs, or SQL errors.
+    log.warn(
+      'Recent Sig context could not be read; continuing without history'
+    );
+    return [];
+  }
+}
 
 /** Call only after the normal incoming sender/group checks, or for a local query. */
 export async function applySigDemoAgentResponse(
@@ -114,8 +173,15 @@ export async function invokeSigDemoAgent(
   const queryId = generateUuid();
   const queryTimestamp = query.sent_at;
   const originAci = itemStorage.user.getCheckedAci();
+  const author = normalizeSigDemoAgentAuthor(getHumanAuthor(query));
+  // Read from SQL before adding this query's response placeholder. The snapshot
+  // is bounded to this conversation and does not depend on loaded UI messages.
+  const history = prompt
+    ? await snapshotSigDemoAgentHistory(conversation, query)
+    : [];
   let sequence = 0;
   let text = '';
+  let placeholder = '';
   let lastPublishedText = '';
   let publication = Promise.resolve();
   const publish = (status: SigDemoAgentFrame['status']) => {
@@ -124,10 +190,10 @@ export async function invokeSigDemoAgent(
       queryTimestamp,
       sequence,
       status,
-      text,
+      text: text || (status === 'streaming' ? placeholder : ''),
     };
     sequence += 1;
-    lastPublishedText = text;
+    lastPublishedText = frame.text;
     lastTransportTimestamp = Math.max(
       Date.now(),
       queryTimestamp + 1,
@@ -159,7 +225,7 @@ export async function invokeSigDemoAgent(
 
   await publish('streaming');
   const timer = setInterval(() => {
-    if (text !== lastPublishedText) {
+    if ((text || placeholder) !== lastPublishedText) {
       drop(publish('streaming'));
     }
   }, 500);
@@ -167,14 +233,41 @@ export async function invokeSigDemoAgent(
     if (!prompt) {
       throw new Error('Ask Sig a question after @sig.');
     }
-    // No conversation history or persistent agent memory is supplied.
-    await streamSigDemoAgent({ requestId: queryId, prompt }, delta => {
-      text = (text + delta).slice(0, 65536);
-    });
+    // Supply only this bounded, per-query snapshot; no persistent agent memory.
+    await streamSigDemoAgent(
+      { requestId: queryId, prompt, author, history },
+      delta => {
+        const hadPlaceholder = Boolean(placeholder);
+        placeholder = '';
+        text = (text + delta).slice(0, 65536);
+        if (hadPlaceholder && text) {
+          drop(publish('streaming'));
+        }
+      },
+      status => {
+        if (text) {
+          return;
+        }
+        placeholder = window.SignalContext.i18n(
+          (
+            {
+              connecting: 'icu:SigDemoAgent--connecting',
+              responding: 'icu:SigDemoAgent--streaming',
+              searching: 'icu:SigDemoAgent--searching',
+            } as const
+          )[status]
+        );
+        if (placeholder !== lastPublishedText) {
+          drop(publish('streaming'));
+        }
+      }
+    );
     clearInterval(timer);
+    placeholder = '';
     await publish('complete');
   } catch (error) {
     clearInterval(timer);
+    placeholder = '';
     const safeError =
       error instanceof Error
         ? error.message

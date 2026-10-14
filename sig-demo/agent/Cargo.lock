@@ -996,8 +996,6 @@ dependencies = [
 [[package]]
 name = "goose-provider-types"
 version = "0.1.0-alpha.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca00f997b11a9b6c7cb4cafa2eef69f5168462b5291642985204468d61b15814"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2411,6 +2409,7 @@ name = "sig-agent"
 version = "0.1.0"
 dependencies = [
  "goose-sdk",
+ "reqwest",
  "serde",
  "serde_json",
  "tokio",

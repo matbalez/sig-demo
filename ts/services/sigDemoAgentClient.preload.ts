@@ -6,6 +6,7 @@ import type { IpcRendererEvent } from 'electron';
 import type {
   SigDemoAgentEventType,
   SigDemoAgentRunRequestType,
+  SigDemoAgentStatusType,
 } from '../types/SigDemoAgent.std.ts';
 import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../types/SigDemoAgent.std.ts';
 import { itemStorage } from '../textsecure/Storage.preload.ts';
@@ -14,7 +15,8 @@ import { drop } from '../util/drop.std.ts';
 /** Only a locally submitted query calls this; received messages never run GDK. */
 export async function streamSigDemoAgent(
   request: Omit<SigDemoAgentRunRequestType, 'provider'>,
-  onText: (delta: string) => void
+  onText: (delta: string) => void,
+  onStatus?: (status: SigDemoAgentStatusType) => void
 ): Promise<void> {
   if (!window.SignalContext.config.sigDemoEnabled) {
     throw new Error('Sig is available in the private demo.');
@@ -57,6 +59,8 @@ export async function streamSigDemoAgent(
       }
       if (chunk.type === 'text') {
         onText(chunk.text);
+      } else if (chunk.type === 'status') {
+        onStatus?.(chunk.status);
       } else if (chunk.type === 'error') {
         finish(new Error(chunk.message));
       } else if (chunk.type === 'done') {

@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { readFileSync, existsSync } from 'node:fs';
+import { Buffer } from 'node:buffer';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -12,20 +13,66 @@ import { z } from 'zod';
 
 import {
   SIG_DEMO_AGENT_MODEL,
+  SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES,
+  SIG_DEMO_AGENT_HISTORY_MAX_BYTES,
+  SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES,
+  SIG_DEMO_AGENT_AUTHOR_MAX_BYTES,
   type SigDemoAgentEventType,
   type SigDemoInferenceProviderType,
 } from '../ts/types/SigDemoAgent.std.ts';
 import { getAppRootDir } from '../ts/util/appRootDir.main.ts';
 import { SigDemoMesh } from './SigDemoMesh.main.ts';
 import { drop } from '../ts/util/drop.std.ts';
+import { createLogger } from '../ts/logging/log.std.ts';
 
+const log = createLogger('SigDemoAgent');
+
+const authorSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .refine(
+    author => Buffer.byteLength(author) <= SIG_DEMO_AGENT_AUTHOR_MAX_BYTES
+  );
+const historySchema = z
+  .array(
+    z.object({
+      role: z.enum(['user', 'assistant']),
+      author: authorSchema,
+      text: z
+        .string()
+        .trim()
+        .min(1)
+        .refine(
+          text =>
+            Buffer.byteLength(text) <= SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES
+        ),
+    })
+  )
+  .max(SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES)
+  .refine(
+    history =>
+      history.reduce(
+        (total, message) =>
+          total +
+          Buffer.byteLength(message.author) +
+          Buffer.byteLength(message.text),
+        0
+      ) <= SIG_DEMO_AGENT_HISTORY_MAX_BYTES
+  );
 const requestSchema = z.object({
   requestId: z.string().uuid(),
   prompt: z.string().trim().min(1).max(65_536),
   provider: z.enum(['mesh-llm', 'chatgpt']),
+  author: authorSchema.optional(),
+  history: historySchema.default([]),
 });
 const chunkSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text'), text: z.string() }),
+  z.object({
+    type: z.literal('status'),
+    status: z.enum(['searching', 'responding']),
+  }),
   z.object({ type: z.literal('done') }),
   z.object({ type: z.literal('error'), message: z.string() }),
 ]);
@@ -34,21 +81,56 @@ const runtimeSchema = z.object({
   model: z.string().min(1).default(SIG_DEMO_AGENT_MODEL),
 });
 
+const braveKeySchema = z
+  .string()
+  .min(1)
+  .max(1024)
+  .regex(/^[\u0021-\u007e]+$/);
+
+function loadBraveKey(): string | undefined {
+  if (app.isPackaged) {
+    const runtime = JSON.parse(
+      readFileSync(
+        join(process.resourcesPath, 'sig-demo-agent/runtime.json'),
+        'utf8'
+      )
+    );
+    return braveKeySchema.optional().parse(runtime.braveApiKey);
+  }
+  const path = join(getAppRootDir(), '.sig-demo/brave.env');
+  if (!existsSync(path)) {
+    return undefined;
+  }
+  const contents = readFileSync(path, 'utf8');
+  const match = contents.match(
+    /^\s*(?:export\s+)?BRAVE_SEARCH_API_KEY\s*=\s*([^\r\n]*)/m
+  );
+  return braveKeySchema.parse(
+    match?.[1]?.trim().replace(/^(['"])(.*)\1$/, '$2')
+  );
+}
+
 function loadRuntime(provider: SigDemoInferenceProviderType) {
   const root = getAppRootDir();
   const binary = app.isPackaged
     ? join(process.resourcesPath, 'sig-demo-agent/sig-demo-agent')
     : join(root, 'sig-demo/agent/target/release/sig-demo-agent');
+  const braveApiKey = provider === 'mesh-llm' ? loadBraveKey() : undefined;
   // Mesh uses no OpenAI credential, including when ChatGPT's file is absent.
   if (provider === 'mesh-llm') {
-    return { binary, model: SIG_DEMO_AGENT_MODEL, apiKey: undefined };
+    return {
+      binary,
+      model: SIG_DEMO_AGENT_MODEL,
+      apiKey: undefined,
+      braveApiKey,
+    };
   }
   if (app.isPackaged) {
     const directory = join(process.resourcesPath, 'sig-demo-agent');
     const runtime = runtimeSchema.parse(
       JSON.parse(readFileSync(join(directory, 'runtime.json'), 'utf8'))
     );
-    return { ...runtime, binary };
+    return { ...runtime, binary, braveApiKey };
   }
   // Keep the key outside NODE_CONFIG, whose values upstream logs at startup.
   const contents = readFileSync(join(root, '.sig-demo/agent.env'), 'utf8');
@@ -63,6 +145,7 @@ function loadRuntime(provider: SigDemoInferenceProviderType) {
   return {
     ...runtime,
     binary,
+    braveApiKey,
   };
 }
 
@@ -94,7 +177,13 @@ export function setupSigDemoAgent(
     ) {
       return { ok: false, error: 'Sig could not start this request.' };
     }
-    const { requestId, prompt, provider } = parsed.data;
+    const { requestId, prompt, provider, author, history } = parsed.data;
+    const requestedAt = performance.now();
+    const send = (chunk: SigDemoAgentEventType) => {
+      if (!event.sender.isDestroyed()) {
+        event.sender.send('sig-demo-agent:event', chunk);
+      }
+    };
     let runtime: ReturnType<typeof loadRuntime>;
     let inference: Awaited<ReturnType<SigDemoMesh['getInference']>> | undefined;
     starting.add(requestId);
@@ -108,6 +197,7 @@ export function setupSigDemoAgent(
         };
       }
       if (provider === 'mesh-llm') {
+        send({ requestId, type: 'status', status: 'connecting' });
         inference = await mesh.getInference();
       }
     } catch {
@@ -129,10 +219,20 @@ export function setupSigDemoAgent(
       return { ok: false, error: 'Sig stopped before starting this request.' };
     }
     starting.delete(requestId);
+    const preparedAt = performance.now();
+    log.info('Inference route ready', {
+      provider,
+      routeWaitMs: Math.round(preparedAt - requestedAt),
+    });
+    send({ requestId, type: 'status', status: 'responding' });
     const env = { ...process.env };
     delete env.OPENAI_API_KEY;
+    delete env.BRAVE_SEARCH_API_KEY;
     if (provider === 'chatgpt') {
       env.OPENAI_API_KEY = runtime.apiKey;
+    }
+    if (runtime.braveApiKey) {
+      env.BRAVE_SEARCH_API_KEY = runtime.braveApiKey;
     }
     const child = spawn(runtime.binary, [], {
       env,
@@ -140,11 +240,7 @@ export function setupSigDemoAgent(
     });
     children.set(requestId, child);
     let completed = false;
-    const send = (chunk: SigDemoAgentEventType) => {
-      if (!event.sender.isDestroyed()) {
-        event.sender.send('sig-demo-agent:event', chunk);
-      }
-    };
+    let receivedText = false;
     const finish = (message?: string) => {
       if (completed) {
         return;
@@ -152,6 +248,11 @@ export function setupSigDemoAgent(
       completed = true;
       clearTimeout(timeout);
       children.delete(requestId);
+      log.info('Inference request finished', {
+        provider,
+        result: message ? 'error' : 'complete',
+        totalMs: Math.round(performance.now() - requestedAt),
+      });
       send(
         message
           ? { requestId, type: 'error', message }
@@ -170,7 +271,16 @@ export function setupSigDemoAgent(
       try {
         const chunk = chunkSchema.parse(JSON.parse(line));
         if (chunk.type === 'text') {
+          if (!receivedText && chunk.text) {
+            receivedText = true;
+            log.info('Inference first text received', {
+              provider,
+              helperToFirstTextMs: Math.round(performance.now() - preparedAt),
+            });
+          }
           send({ requestId, type: 'text', text: chunk.text });
+        } else if (chunk.type === 'status') {
+          send({ requestId, type: 'status', status: chunk.status });
         } else if (chunk.type === 'error') {
           finish(chunk.message);
         } else {
@@ -193,6 +303,9 @@ export function setupSigDemoAgent(
       `${JSON.stringify({
         prompt,
         provider,
+        author,
+        history,
+        currentDate: new Date().toISOString().slice(0, 10),
         ...(inference ?? { model: runtime.model }),
       })}\n`
     );

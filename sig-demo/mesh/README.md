@@ -22,14 +22,24 @@ only the child it owns.
 
 The client has an app-owned configuration, node key, join token, and caches.
 Default plugins, owner attestation, local models, and analytics are disabled.
-The sidecar receives no OpenAI key. Public discovery advertises meshes, rather
-than individual serving nodes: sig demo shuffles usable public listings, joins
-one, and chooses a random available free text-inference node from `/v1/models`.
+The sidecar receives no OpenAI or Brave key. Its connection is prepared speculatively
+when the app starts. Fresh discovery uses the upstream `client --auto` path,
+which races multiple public bootstraps rather than retrying one serially.
+After joining, sig demo caches two to four eligible public bootstrap hints for
+up to 24 hours. Later launches supply each hint through a separate `--join-file`
+argument to use the same parallel race; stale or unavailable hints fall back to
+fresh discovery. The cache never stores the ephemeral local client's invite.
+The app chooses a random available free text-inference node from `/v1/models`.
 An `x-mesh-target` header pins inference to that node. A missing node produces an
 error; Sig can discover another for the next request. There is no automatic
 fallback to ChatGPT and no paid-node funding.
 
-The selected operator processes the submitted question. Only the current query
-is provided; chat history and attachments stay out of inference. GDK handles
+The selected operator processes the current question and up to 12 recent text
+messages from the same chat, under a 6,000-byte history budget. Attachments,
+deleted or expired messages, and unfinished replies are excluded. GDK handles
 the OpenAI-compatible streaming protocol through a declarative provider with
-the explicit `/v1/chat/completions` path.
+the explicit `/v1/chat/completions` path. A bounded GDK planning request selects
+the local Brave tool through native function calls, with a validated JSON decision
+fallback for text models that do not support them. Only the local Rust helper
+calls Brave; the chosen mesh node receives
+bounded public search excerpts and source links for the final answer.

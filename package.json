@@ -21,7 +21,7 @@
     "demo:package": "node scripts/package-sig-demo.mjs",
     "demo:agent:build": "sh sig-demo/agent/build.sh",
     "demo:mesh:fetch": "node scripts/fetch-sig-demo-mesh.mjs",
-    "demo:test": "node --test tests/sig-demo-isolation_test.node.mjs tests/sig-demo-relay_test.node.mjs tests/sig-demo-registration-draft_test.node.mjs tests/sig-demo-agent_test.node.mjs",
+    "demo:test": "node --test tests/sig-demo-isolation_test.node.mjs tests/sig-demo-relay_test.node.mjs tests/sig-demo-registration-draft_test.node.mjs tests/sig-demo-agent_test.node.mjs tests/sig-demo-mesh-bootstrap_test.node.mjs tests/sig-demo-agent-context_test.node.mjs",
     "generate": "run-s generate:phase-0 generate:phase-1",
     "generate:phase-0": "run-s build:protobuf build:emoji-data build:rolldown:prod",
     "generate:phase-1": "run-p --aggregate-output --print-label build:icu-types build:compact-locales build:styles:prod get-expire-time build:policy-files build:db-schema",

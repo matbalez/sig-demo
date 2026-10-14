@@ -6,7 +6,7 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { randomInt } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -17,6 +17,11 @@ import { getAppRootDir } from '../ts/util/appRootDir.main.ts';
 import { createLogger } from '../ts/logging/log.std.ts';
 import { sleep } from '../ts/util/sleep.std.ts';
 import { strictAssert } from '../ts/util/assert.std.ts';
+import { drop } from '../ts/util/drop.std.ts';
+import {
+  parseSigDemoMeshBootstrapCache,
+  selectSigDemoMeshBootstrapTokens,
+} from '../ts/util/sigDemoMeshBootstrap.node.ts';
 
 const log = createLogger('SigDemoMesh');
 const runFile = promisify(execFile);
@@ -25,18 +30,6 @@ const CONSOLE_PORT = 3131;
 const BASE_URL = `http://127.0.0.1:${API_PORT}/v1`;
 const CONTROL_URL = `http://127.0.0.1:${CONSOLE_PORT}`;
 
-const discoverySchema = z.array(
-  z.object({
-    listing: z.object({
-      invite_token: z.string().min(1).max(32_768),
-      serving: z.array(z.string()),
-      node_count: z.number().nonnegative(),
-      client_count: z.number().nonnegative().default(0),
-      max_clients: z.number().nonnegative().default(0),
-    }),
-    expires_at: z.number().nullable().optional(),
-  })
-);
 const modelsSchema = z.object({
   data: z.array(
     z.object({
@@ -199,24 +192,15 @@ async function requireAvailablePort(port: number): Promise<void> {
   });
 }
 
-function shuffle<T>(values: ReadonlyArray<T>): Array<T> {
-  const result = [...values];
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const other = randomInt(index + 1);
-    const left = result[index];
-    const right = result[other];
-    strictAssert(left !== undefined && right !== undefined, 'Invalid shuffle');
-    [result[index], result[other]] = [right, left];
-  }
-  return result;
-}
-
 /** Owns the bundled client; prompts go only to the explicitly selected peer. */
 export class SigDemoMesh {
   #child: ChildProcess | undefined;
   #initializePromise: Promise<void> | undefined;
   #connectionPromise: Promise<SigDemoMeshInferenceType> | undefined;
   #selected: SigDemoMeshInferenceType | undefined;
+  #availableNodeIds: Array<string> = [];
+  #startedFromCache = false;
+  #cacheRefreshPromise: Promise<void> | undefined;
   #stopped = false;
   #replacedExisting = false;
   readonly #directory = join(app.getPath('userData'), 'mesh');
@@ -298,9 +282,31 @@ export class SigDemoMesh {
         '[[plugin]]\nname = "payments"\nenabled = false\n',
       { mode: 0o600 }
     );
-    // The discovery process must not implicitly rejoin yesterday's token.
+    // Explicit bootstraps below own rejoining; ignore legacy implicit tokens.
     await rm(join(this.#directory, 'invite.token'), { force: true });
-    await this.#launch();
+    let tokens: Array<string> | undefined;
+    try {
+      tokens = parseSigDemoMeshBootstrapCache(
+        JSON.parse(
+          await readFile(join(this.#directory, 'bootstrap-cache.json'), 'utf8')
+        ),
+        Date.now()
+      );
+    } catch {
+      // Fresh installs and unreadable caches use public discovery.
+    }
+    this.#startedFromCache = tokens !== undefined;
+    try {
+      await this.#launch(tokens);
+    } catch (error) {
+      if (!tokens || this.#stopped) {
+        throw error;
+      }
+      log.info('Cached mesh bootstraps unavailable; refreshing discovery');
+      this.#startedFromCache = false;
+      await rm(join(this.#directory, 'bootstrap-cache.json'), { force: true });
+      await this.#launch();
+    }
     log.info('Bundled mesh client started');
   }
 
@@ -329,7 +335,7 @@ export class SigDemoMesh {
     };
   }
 
-  async #launch(token?: string): Promise<void> {
+  async #launch(tokens?: ReadonlyArray<string>): Promise<void> {
     if (this.#stopped) {
       throw new Error('The mesh was stopped.');
     }
@@ -361,10 +367,16 @@ export class SigDemoMesh {
       '--log-format',
       'json',
     ];
-    if (token) {
-      const path = join(this.#directory, 'selected-mesh.token');
-      await writeFile(path, token, { mode: 0o600 });
-      args.push('--join-file', path);
+    if (tokens?.length) {
+      for (const [index, token] of tokens.entries()) {
+        const path = join(this.#directory, `bootstrap-${index}.token`);
+        await writeFile(path, token, { mode: 0o600 });
+        args.push('--join-file', path);
+      }
+    } else {
+      // Upstream discovers several public bootstraps and races the first four,
+      // avoiding the serial single-token path that blocks on peer gossip.
+      args.push('--auto');
     }
     if (this.#stopped) {
       throw new Error('The mesh was stopped.');
@@ -380,9 +392,9 @@ export class SigDemoMesh {
     child.once('error', () => {
       failed = true;
     });
-    // Upstream retries three 30-second QUIC handshakes, with 5/10-second
-    // backoffs, before binding its local management and inference endpoints.
-    const deadline = Date.now() + (token ? 110_000 : 20_000);
+    // Fast client joins race up to four 30-second probes. Keep the full
+    // upstream retry allowance only for a legacy single-token launch.
+    const deadline = Date.now() + (tokens?.length === 1 ? 110_000 : 45_000);
     while (Date.now() < deadline) {
       if (
         this.#stopped ||
@@ -448,7 +460,28 @@ export class SigDemoMesh {
         }
       }
     }
+    this.#availableNodeIds = [
+      ...new Set(routes.map(route => route.targetNodeId)),
+    ];
     return routes;
+  }
+
+  async #waitForRoute(
+    timeout: number
+  ): Promise<SigDemoMeshInferenceType | undefined> {
+    const deadline = Date.now() + timeout;
+    while (Date.now() < deadline && !this.#stopped) {
+      try {
+        const selected = this.#selectRoute(await this.#availableRoutes());
+        if (selected) {
+          return selected;
+        }
+      } catch {
+        // Inference listeners and admitted model advertisements can lag health.
+      }
+      await sleep(250);
+    }
+    return undefined;
   }
 
   async #connect(): Promise<SigDemoMeshInferenceType> {
@@ -458,60 +491,25 @@ export class SigDemoMesh {
         this.#child.exitCode != null ||
         this.#child.signalCode != null
       ) {
+        this.#startedFromCache = false;
         await this.#launch();
       }
-      // A failed selected peer can leave other free nodes in the same mesh
-      // reachable. Reuse that connection before restarting discovery.
-      try {
-        const selected = this.#selectRoute(await this.#availableRoutes());
-        if (selected && !this.#stopped) {
-          return selected;
-        }
-      } catch {
-        // A bare discovery client can have no OpenAI models endpoint yet.
+      // Also reuse another live peer in the current mesh if the selected one
+      // disappeared. The route remains uniformly random across free nodes.
+      let selected = await this.#waitForRoute(30_000);
+      if (selected) {
+        return selected;
       }
-      const discovered = discoverySchema.parse(
-        await readJson(`${CONTROL_URL}/api/discover`, 25_000)
-      );
-      const now = Date.now() / 1000;
-      const meshes = shuffle(
-        discovered.filter(
-          mesh =>
-            mesh.listing.serving.length > 0 &&
-            mesh.listing.node_count > 0 &&
-            (!mesh.expires_at || mesh.expires_at > now) &&
-            (mesh.listing.max_clients === 0 ||
-              mesh.listing.client_count < mesh.listing.max_clients)
-        )
-      );
-      // Bound startup time for a demo while giving stale public adverts a
-      // chance to be skipped. Each attempt only restarts our own child.
-      for (const mesh of meshes.slice(0, 2)) {
-        if (this.#stopped) {
-          throw new Error('The mesh was stopped.');
-        }
-        try {
-          await this.#launch(mesh.listing.invite_token);
-          // Management liveness can become ready before the join has started
-          // its inference proxy. Keep polling through that transient window.
-          const deadline = Date.now() + 55_000;
-          while (Date.now() < deadline && !this.#stopped) {
-            try {
-              const routes = await this.#availableRoutes();
-              const selected = this.#selectRoute(routes);
-              if (selected && !this.#stopped) {
-                return selected;
-              }
-            } catch {
-              // The local OpenAI port and model gossip can lag /health.
-            }
-            await sleep(500);
-          }
-        } catch (error) {
-          log.info(
-            'Public mesh candidate unavailable; trying another',
-            failureReason(error)
-          );
+      if (this.#startedFromCache && !this.#stopped) {
+        log.info('Cached mesh has no available model; refreshing discovery');
+        this.#startedFromCache = false;
+        await rm(join(this.#directory, 'bootstrap-cache.json'), {
+          force: true,
+        });
+        await this.#launch();
+        selected = await this.#waitForRoute(55_000);
+        if (selected) {
+          return selected;
         }
       }
     } catch (error) {
@@ -537,6 +535,35 @@ export class SigDemoMesh {
     strictAssert(selected, 'No available mesh route');
     this.#selected = selected;
     log.info('Connected to an available public mesh node');
+    if (!this.#cacheRefreshPromise) {
+      this.#cacheRefreshPromise = this.#refreshBootstrapCache();
+      drop(this.#cacheRefreshPromise);
+    }
     return selected;
+  }
+
+  async #refreshBootstrapCache(): Promise<void> {
+    const child = this.#child;
+    try {
+      // This runs after readiness, outside the first inference request's path.
+      // Never store /api/status.token: it names this ephemeral local client.
+      const discovered = await readJson(`${CONTROL_URL}/api/discover`, 25_000);
+      const tokens = selectSigDemoMeshBootstrapTokens(discovered, {
+        now: Date.now(),
+        preferredNodeIds: this.#availableNodeIds,
+      });
+      if (tokens.length < 2 || this.#stopped || this.#child !== child) {
+        return;
+      }
+      await writeFile(
+        join(this.#directory, 'bootstrap-cache.json'),
+        `${JSON.stringify({ version: 1, savedAt: Date.now(), tokens })}\n`,
+        { mode: 0o600 }
+      );
+    } catch {
+      // Caching is optional; startup can always use fresh public discovery.
+    } finally {
+      this.#cacheRefreshPromise = undefined;
+    }
   }
 }

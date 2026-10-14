@@ -1,0 +1,9 @@
+Goose provider types 0.1.0-alpha.12
+Upstream authors: AAIF <ai-oss-tools@block.xyz>
+https://github.com/aaif-goose/goose
+Upstream revision: 4811ae25f736fdf0ede847449c060e96645426b5
+
+This copy is distributed under the upstream Apache License 2.0 in LICENSE.
+Sig Demo contributors modified src/formats/openai_responses.rs in 2026 to
+support the OpenAI Responses built-in web search tool and plain-text citations.
+See SIG_DEMO_PATCH.md for the scope of the local compatibility patch.

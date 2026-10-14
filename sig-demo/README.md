@@ -21,13 +21,28 @@ Signal feature parity are outside this demo.
 Type `@sig` and a question in any chat to run that sender's local Sig helper.
 Everyone in the chat sees one Sig reply for that query, updated as text streams;
 the next question gets a separate reply. Responses travel through the existing
-encrypted direct or group messaging path. The helper receives only the submitted
-question, with no chat history or memory. See [Sig helper](agent/README.md).
+encrypted direct or group messaging path. Sig receives the current question and
+up to 12 recent completed text messages from that chat, including earlier Sig
+answers. History has a 6,000-byte budget (roughly 2,000 tokens), with long messages
+shortened. Attachments, deleted or expired messages, and unfinished replies are
+excluded. Each invocation takes a fresh history snapshot; there is no separate
+persistent agent memory. See [Sig helper](agent/README.md).
+
+With **mesh-llm**, Sig can call a local Brave web-search tool when a question needs
+current information or explicitly asks for a search. The Rust helper sends a concise
+search query to Brave's LLM Context API and returns bounded excerpts and source
+URLs to the selected inference provider. It permits at most two searches per
+question and asks Sig to cite the source URLs. The approved Brave demo key is
+bundled with private downloads, so friends need no API setup. The key is never
+sent to mesh nodes. Brave receives search queries under its
+[Search API privacy notice](https://api-dashboard.search.brave.com/app/documentation/general/privacy-policy).
+With **ChatGPT**, Sig uses OpenAI's built-in web search through GDK's Responses
+API path. ChatGPT requests do not load the Brave tool or receive its credential.
 
 **General → Inference** selects the provider for the next question. The default
 is **mesh-llm**: a bundled client joins a randomly selected public mesh and picks
 an available free text-inference node at random. The selected node processes the
-submitted question. **ChatGPT** uses the existing bundled OpenAI credential.
+question and bounded chat context. **ChatGPT** uses the existing bundled OpenAI credential.
 The setting is saved on each Mac, and provider changes leave earlier replies intact.
 If the mesh is unavailable, Sig reports that rather than silently sending the
 question to OpenAI.
@@ -37,6 +52,9 @@ user, then starts its bundled version on local ports 9337 and 3131. This interru
 other mesh work on the Mac. Its node identity, configuration, caches, and join
 token are separate from an existing mesh installation. The sidecar is client-only:
 it does not download models or share the Mac's GPU. It exits when sig demo quits.
+The connection is prepared while the app opens. Public bootstrap nodes are raced
+in parallel, and eligible bootstrap hints are cached for up to 24 hours to speed
+up later launches. An unavailable cache falls back to fresh public discovery.
 See [bundled mesh sidecar](mesh/README.md).
 
 Use **Node 24.21.0**, **pnpm 11.24.0**, macOS Xcode Command Line Tools, and OpenSSL.
@@ -107,10 +125,11 @@ node scripts/fetch-sig-demo-mesh.mjs
 pnpm run demo:package --config .sig-demo/client.json --arch arm64
 ```
 
-The local helper also needs the approved demo credential in ignored
-`.sig-demo/agent.env`; the packager accepts another private credential file with
-`--agent-key-file`. The packaged helper gets that demo credential from an Electron
-resource for the ChatGPT option, and each tester runs the helper on their own Mac.
+The local helper needs the approved demo credentials in ignored
+`.sig-demo/agent.env` (`OPENAI_API_KEY`) and `.sig-demo/brave.env`
+(`BRAVE_SEARCH_API_KEY`). The packager accepts other private credential files
+with `--agent-key-file` and `--brave-key-file`. The packaged helper gets the demo
+credentials from an Electron resource, and each tester runs it on their own Mac.
 Mesh requests receive no OpenAI credential. The packager includes the verified
 official mesh-llm 0.78.1 macOS bundle and its Apache-2.0 license.
 
@@ -122,7 +141,8 @@ It also leaves a review copy at `release/mac-arm64/sig demo.app`;
 use the ZIP or the printed signed staging path for
 installation. Server settings in the bundle are public; invitations and server
 private keys stay separate. The bundle also carries the approved demo agent
-credential. The helper does not publish or notarize the app.
+credentials, so distribute it through the private download repository. The helper
+does not publish or notarize the app.
 
 Implementation details are in [client account creation](CLIENT-PLAN.md) and
 [private backend](server/README.md).
