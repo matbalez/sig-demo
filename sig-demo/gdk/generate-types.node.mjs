@@ -2,15 +2,25 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { readFile, writeFile } from 'node:fs/promises';
-import { fileURLToPath, URL } from 'node:url';
+import { resolve } from 'node:path';
+import process from 'node:process';
+import { fileURLToPath, pathToFileURL, URL } from 'node:url';
 import { format, resolveConfig } from 'prettier';
 
+const outputDirectory = process.argv[2]
+  ? pathToFileURL(`${resolve(process.argv[2])}/`)
+  : new URL('./generated/', import.meta.url);
 const schema = JSON.parse(
-  await readFile(new URL('./generated/schema.json', import.meta.url), 'utf8')
+  await readFile(new URL('schema.json', outputDirectory), 'utf8')
 );
 const camel = name =>
   name.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase());
-const nameOf = name => (name === 'GooseError' ? 'GooseErrorData' : name);
+const errorEnums = new Set(
+  schema.enums
+    .filter(value => value.name.endsWith('Error'))
+    .map(value => value.name)
+);
+const nameOf = name => (errorEnums.has(name) ? `${name}Data` : name);
 const usedObjects = new Set();
 function typeOf(type) {
   if (!type) return 'void';
@@ -26,7 +36,9 @@ function typeOf(type) {
     case 'enum':
       return nameOf(type.name);
     case 'object':
-      if (['Provider', 'ProviderStream'].includes(type.name)) {
+      if (
+        ['Provider', 'ProviderStream', 'SigAgentStream'].includes(type.name)
+      ) {
         usedObjects.add(type.name);
         return type.name;
       }
@@ -73,26 +85,26 @@ if (usedObjects.size) {
   definitions.splice(
     3,
     0,
-    `import type { ${[...usedObjects].join(', ')} } from '../bindings.node.ts';`
+    `import type { ${[...usedObjects].join(', ')} } from '../${schema.namespace === 'sig_demo_agent' ? 'agent-bindings' : 'bindings'}.node.ts';`
   );
 }
 const options = await resolveConfig(
-  fileURLToPath(new URL('./generated/types.std.ts', import.meta.url))
+  fileURLToPath(new URL('types.std.ts', outputDirectory))
 );
 const formatTypes = source =>
   format(source, { ...options, parser: 'typescript' });
 await writeFile(
-  new URL('./generated/types.std.ts', import.meta.url),
+  new URL('types.std.ts', outputDirectory),
   await formatTypes(`${definitions.join('\n')}\n`)
 );
 await writeFile(
-  new URL('./generated/schema.std.ts', import.meta.url),
+  new URL('schema.std.ts', outputDirectory),
   await formatTypes(
     `// Copyright 2026 sig demo contributors\n// SPDX-License-Identifier: AGPL-3.0-only\n// Generated from the SDK cdylib UniFFI metadata. Do not edit.\nexport const uniffiSchema = ${JSON.stringify(schema, null, 2)} as const;\n`
   )
 );
 await writeFile(
-  new URL('./generated/schema.json', import.meta.url),
+  new URL('schema.json', outputDirectory),
   await format(`${JSON.stringify(schema, null, 2)}\n`, {
     ...options,
     parser: 'json',

@@ -27,10 +27,7 @@ import {
 } from '../util/whatTypeOfConversation.dom.ts';
 import { drop } from '../util/drop.std.ts';
 import { streamSigDemoAgent } from './sigDemoAgentClient.preload.ts';
-import {
-  buildSigDemoAgentHistory,
-  normalizeSigDemoAgentAuthor,
-} from '../util/sigDemoAgentContext.std.ts';
+import { collectSigDemoAgentHistoryCandidates } from '../util/sigDemoAgentContext.std.ts';
 import { hasNumberTitle } from '../util/getTitle.preload.ts';
 import type { SigDemoAgentHistoryMessageType } from '../types/SigDemoAgent.std.ts';
 import { createLogger } from '../logging/log.std.ts';
@@ -74,7 +71,7 @@ async function snapshotSigDemoAgentHistory(
       includeStoryReplies: false,
       storyId: undefined,
     });
-    return buildSigDemoAgentHistory({
+    return collectSigDemoAgentHistoryCandidates({
       messages,
       query,
       getAuthor: getHumanAuthor,
@@ -173,7 +170,7 @@ export async function invokeSigDemoAgent(
   const queryId = generateUuid();
   const queryTimestamp = query.sent_at;
   const originAci = itemStorage.user.getCheckedAci();
-  const author = normalizeSigDemoAgentAuthor(getHumanAuthor(query));
+  const author = getHumanAuthor(query);
   // Read from SQL before adding this query's response placeholder. The snapshot
   // is bounded to this conversation and does not depend on loaded UI messages.
   const history = prompt
@@ -233,7 +230,7 @@ export async function invokeSigDemoAgent(
     if (!prompt) {
       throw new Error('Ask Sig a question after @sig.');
     }
-    // Supply only this bounded, per-query snapshot; no persistent agent memory.
+    // Supply eligible records; the native Goose agent owns context and prompts.
     await streamSigDemoAgent(
       { requestId: queryId, prompt, author, history },
       delta => {

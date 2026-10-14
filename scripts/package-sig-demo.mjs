@@ -99,7 +99,7 @@ if (
 const builderPath = resolve(root, 'node_modules/electron-builder/cli.js');
 const gdkLibraryPath = resolve(
   root,
-  'sig-demo/gdk/native/target/release/libgoose_sdk.dylib'
+  'sig-demo/gdk/native-agent/target/release/libsig_demo_agent.dylib'
 );
 if (!existsSync(gdkLibraryPath)) {
   throw new Error(
@@ -168,7 +168,7 @@ if (
 const buildRoot = mkdtempSync(join(tmpdir(), 'sig-demo-build-'));
 const gdkResources = resolve(buildRoot, 'sig-demo-gdk');
 mkdirSync(gdkResources, { mode: 0o700 });
-copyFileSync(gdkLibraryPath, resolve(gdkResources, 'libgoose_sdk.dylib'));
+copyFileSync(gdkLibraryPath, resolve(gdkResources, 'libsig_demo_agent.dylib'));
 for (const name of ['LICENSE', 'NOTICE', 'SIG_DEMO_PATCH.md']) {
   copyFileSync(
     resolve(root, 'sig-demo/gdk/native/vendor/goose-provider-types', name),
@@ -291,7 +291,7 @@ try {
       '--force',
       '--sign',
       '-',
-      resolve(app, 'Contents/Resources/sig-demo-gdk/libgoose_sdk.dylib'),
+      resolve(app, 'Contents/Resources/sig-demo-gdk/libsig_demo_agent.dylib'),
     ],
     { cwd: root, stdio: 'inherit' }
   );

@@ -21,15 +21,18 @@ const ERROR_CODES = [
 
 export type SigDemoAgentErrorCodeType = (typeof ERROR_CODES)[number];
 const allowedCodes = new Set<string>(ERROR_CODES);
+function isErrorCode(value: unknown): value is SigDemoAgentErrorCodeType {
+  return typeof value === 'string' && allowedCodes.has(value);
+}
 
 /** Messages constructed by the application, safe to display without SDK details. */
 export class SigDemoAgentRuntimeError extends Error {
   readonly code: SigDemoAgentErrorCodeType;
 
-  constructor(message: string, code?: SigDemoAgentErrorCodeType) {
+  constructor(message: string, code?: unknown) {
     super(message);
     // Untyped callers cannot put provider diagnostics into a logging field.
-    this.code = code && allowedCodes.has(code) ? code : 'application-error';
+    this.code = isErrorCode(code) ? code : 'application-error';
   }
 }
 

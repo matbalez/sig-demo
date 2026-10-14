@@ -10,10 +10,9 @@ import { z } from 'zod';
 
 import {
   SIG_DEMO_AGENT_MODEL,
-  SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES,
-  SIG_DEMO_AGENT_HISTORY_MAX_BYTES,
-  SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES,
-  SIG_DEMO_AGENT_AUTHOR_MAX_BYTES,
+  SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES,
+  SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES,
+  SIG_DEMO_AGENT_INPUT_AUTHOR_MAX_BYTES,
   SIG_DEMO_DEFAULT_INFERENCE_PROVIDER,
   type SigDemoAgentEventType,
   type SigDemoInferenceProviderType,
@@ -25,7 +24,7 @@ import {
 } from './SigDemoMesh.main.ts';
 import { drop } from '../ts/util/drop.std.ts';
 import { createLogger } from '../ts/logging/log.std.ts';
-import { loadGdk } from '../sig-demo/gdk/bindings.node.ts';
+import { loadSigAgent } from '../sig-demo/gdk/agent-bindings.node.ts';
 import { createSigDemoAgentRuntime } from './SigDemoAgentRuntime.node.ts';
 import {
   safeSigDemoAgentError,
@@ -36,27 +35,18 @@ const log = createLogger('SigDemoAgent');
 
 const authorSchema = z
   .string()
-  .trim()
-  .min(1)
   .refine(
-    author => Buffer.byteLength(author) <= SIG_DEMO_AGENT_AUTHOR_MAX_BYTES
+    author => Buffer.byteLength(author) <= SIG_DEMO_AGENT_INPUT_AUTHOR_MAX_BYTES
   );
 const historySchema = z
   .array(
     z.object({
       role: z.enum(['user', 'assistant']),
       author: authorSchema,
-      text: z
-        .string()
-        .trim()
-        .min(1)
-        .refine(
-          text =>
-            Buffer.byteLength(text) <= SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES
-        ),
+      text: z.string().min(1),
     })
   )
-  .max(SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES)
+  .max(SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES)
   .refine(
     history =>
       history.reduce(
@@ -65,7 +55,7 @@ const historySchema = z
           Buffer.byteLength(message.author) +
           Buffer.byteLength(message.text),
         0
-      ) <= SIG_DEMO_AGENT_HISTORY_MAX_BYTES
+      ) <= SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES
   );
 const providerSchema = z.enum(['mesh-llm', 'mesh-llm-paid', 'chatgpt']);
 const requestSchema = z.object({
@@ -111,10 +101,10 @@ function loadBraveKey(): string | undefined {
 
 function nativeLibrary(): string {
   return app.isPackaged
-    ? join(process.resourcesPath, 'sig-demo-gdk/libgoose_sdk.dylib')
+    ? join(process.resourcesPath, 'sig-demo-gdk/libsig_demo_agent.dylib')
     : join(
         getAppRootDir(),
-        'sig-demo/gdk/native/target/release/libgoose_sdk.dylib'
+        'sig-demo/gdk/native-agent/target/release/libsig_demo_agent.dylib'
       );
 }
 
@@ -166,7 +156,7 @@ export function setupSigDemoAgent(
   let nativeRuntime: ReturnType<typeof createSigDemoAgentRuntime> | undefined;
   const getRuntime = () => {
     if (!nativeRuntime) {
-      nativeRuntime = createSigDemoAgentRuntime(loadGdk(nativeLibrary()));
+      nativeRuntime = createSigDemoAgentRuntime(loadSigAgent(nativeLibrary()));
     }
     return nativeRuntime;
   };

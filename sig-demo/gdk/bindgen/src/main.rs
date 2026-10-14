@@ -78,11 +78,12 @@ fn main() -> Result<()> {
     let arguments = std::env::args().collect::<Vec<_>>();
     let library = arguments.get(1).context("Provide the SDK cdylib path")?;
     let output = arguments.get(2).context("Provide the schema output path")?;
+    let namespace = arguments.get(3).map(String::as_str).unwrap_or("goose");
     let components = find_components(Utf8Path::new(library), &EmptyCrateConfigSupplier)?;
     let mut ci = components
         .iter()
-        .find(|component| component.ci.namespace() == "goose")
-        .context("The library does not contain the Goose UniFFI namespace")?
+        .find(|component| component.ci.namespace() == namespace)
+        .with_context(|| format!("The library does not contain the {namespace} UniFFI namespace"))?
         .ci
         .clone();
     ci.derive_ffi_funcs()?;
@@ -140,7 +141,7 @@ fn main() -> Result<()> {
     });
     std::fs::write(output, serde_json::to_string_pretty(&result)? + "\n")?;
     println!(
-        "Extracted Goose UniFFI metadata: {} records, {} enums, {} objects",
+        "Extracted {namespace} UniFFI metadata: {} records, {} enums, {} objects",
         ci.record_definitions().len(),
         ci.enum_definitions().len(),
         ci.object_definitions().len()

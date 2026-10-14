@@ -1,0 +1,452 @@
+// Copyright 2026 sig demo contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+// Generated from the SDK cdylib UniFFI metadata. Do not edit.
+export const uniffiSchema = {
+  buffers: {
+    allocate: {
+      arguments: ['uint64'],
+      return: 'rust_buffer',
+      status: true,
+      symbol: 'ffi_sig_demo_agent_rustbuffer_alloc',
+    },
+    free: {
+      arguments: ['rust_buffer'],
+      return: 'void',
+      status: true,
+      symbol: 'ffi_sig_demo_agent_rustbuffer_free',
+    },
+    fromBytes: {
+      arguments: ['foreignbytes'],
+      return: 'rust_buffer',
+      status: true,
+      symbol: 'ffi_sig_demo_agent_rustbuffer_from_bytes',
+    },
+  },
+  checksums: [
+    {
+      symbol: 'uniffi_sig_demo_agent_checksum_func_start_sig_agent',
+      value: 35061,
+    },
+    {
+      symbol: 'uniffi_sig_demo_agent_checksum_method_sigagentstream_cancel',
+      value: 20909,
+    },
+    {
+      symbol: 'uniffi_sig_demo_agent_checksum_method_sigagentstream_next_event',
+      value: 31692,
+    },
+    {
+      symbol: 'uniffi_sig_demo_agent_checksum_method_sigagentstream_shutdown',
+      value: 19314,
+    },
+  ],
+  contractSymbol: 'ffi_sig_demo_agent_uniffi_contract_version',
+  contractVersion: 30,
+  enums: [
+    {
+      flat: false,
+      name: 'SigAgentError',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'details',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Generic',
+        },
+      ],
+    },
+    {
+      flat: false,
+      name: 'SigAgentEvent',
+      variants: [
+        {
+          fields: [
+            {
+              name: 'text',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Text',
+        },
+        {
+          fields: [
+            {
+              name: 'status',
+              type: {
+                kind: 'enum',
+                name: 'SigAgentStatus',
+              },
+            },
+          ],
+          name: 'Status',
+        },
+        {
+          fields: [
+            {
+              name: 'phase',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'duration_ms',
+              type: {
+                kind: 'uint64',
+              },
+            },
+          ],
+          name: 'Timing',
+        },
+        {
+          fields: [],
+          name: 'Done',
+        },
+        {
+          fields: [
+            {
+              name: 'code',
+              type: {
+                kind: 'string',
+              },
+            },
+            {
+              name: 'message',
+              type: {
+                kind: 'string',
+              },
+            },
+          ],
+          name: 'Error',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'SigAgentMode',
+      variants: [
+        {
+          fields: [],
+          name: 'Answer',
+        },
+        {
+          fields: [],
+          name: 'Warmup',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'SigAgentProvider',
+      variants: [
+        {
+          fields: [],
+          name: 'MeshLlm',
+        },
+        {
+          fields: [],
+          name: 'Chatgpt',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'SigAgentStatus',
+      variants: [
+        {
+          fields: [],
+          name: 'Responding',
+        },
+        {
+          fields: [],
+          name: 'Searching',
+        },
+      ],
+    },
+    {
+      flat: true,
+      name: 'SigHistoryRole',
+      variants: [
+        {
+          fields: [],
+          name: 'User',
+        },
+        {
+          fields: [],
+          name: 'Assistant',
+        },
+      ],
+    },
+  ],
+  functions: [
+    {
+      arguments: [
+        {
+          name: 'config',
+          type: {
+            kind: 'record',
+            name: 'SigAgentConfig',
+          },
+        },
+        {
+          name: 'request',
+          type: {
+            kind: 'record',
+            name: 'SigAgentRequest',
+          },
+        },
+      ],
+      async: true,
+      error: 'SigAgentError',
+      ffi: {
+        arguments: ['rust_buffer', 'rust_buffer'],
+        return: 'uint64',
+        status: false,
+        symbol: 'uniffi_sig_demo_agent_fn_func_start_sig_agent',
+      },
+      futureFlavor: 'u64',
+      name: 'start_sig_agent',
+      return: {
+        kind: 'object',
+        name: 'SigAgentStream',
+      },
+    },
+  ],
+  futures: {
+    rust_buffer: {
+      cancel: 'ffi_sig_demo_agent_rust_future_cancel_rust_buffer',
+      complete: {
+        arguments: ['uint64'],
+        return: 'rust_buffer',
+        status: true,
+        symbol: 'ffi_sig_demo_agent_rust_future_complete_rust_buffer',
+      },
+      free: 'ffi_sig_demo_agent_rust_future_free_rust_buffer',
+      poll: 'ffi_sig_demo_agent_rust_future_poll_rust_buffer',
+    },
+    u64: {
+      cancel: 'ffi_sig_demo_agent_rust_future_cancel_u64',
+      complete: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'ffi_sig_demo_agent_rust_future_complete_u64',
+      },
+      free: 'ffi_sig_demo_agent_rust_future_free_u64',
+      poll: 'ffi_sig_demo_agent_rust_future_poll_u64',
+    },
+    void: {
+      cancel: 'ffi_sig_demo_agent_rust_future_cancel_void',
+      complete: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'ffi_sig_demo_agent_rust_future_complete_void',
+      },
+      free: 'ffi_sig_demo_agent_rust_future_free_void',
+      poll: 'ffi_sig_demo_agent_rust_future_poll_void',
+    },
+  },
+  namespace: 'sig_demo_agent',
+  objects: [
+    {
+      clone: {
+        arguments: ['uint64'],
+        return: 'uint64',
+        status: true,
+        symbol: 'uniffi_sig_demo_agent_fn_clone_sigagentstream',
+      },
+      free: {
+        arguments: ['uint64'],
+        return: 'void',
+        status: true,
+        symbol: 'uniffi_sig_demo_agent_fn_free_sigagentstream',
+      },
+      methods: [
+        {
+          arguments: [],
+          async: false,
+          error: null,
+          ffi: {
+            arguments: ['uint64'],
+            return: 'void',
+            status: true,
+            symbol: 'uniffi_sig_demo_agent_fn_method_sigagentstream_cancel',
+          },
+          futureFlavor: 'void',
+          name: 'cancel',
+          return: null,
+        },
+        {
+          arguments: [],
+          async: true,
+          error: 'SigAgentError',
+          ffi: {
+            arguments: ['uint64'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_sig_demo_agent_fn_method_sigagentstream_next_event',
+          },
+          futureFlavor: 'rust_buffer',
+          name: 'next_event',
+          return: {
+            inner: {
+              kind: 'enum',
+              name: 'SigAgentEvent',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          arguments: [],
+          async: true,
+          error: null,
+          ffi: {
+            arguments: ['uint64'],
+            return: 'uint64',
+            status: false,
+            symbol: 'uniffi_sig_demo_agent_fn_method_sigagentstream_shutdown',
+          },
+          futureFlavor: 'void',
+          name: 'shutdown',
+          return: null,
+        },
+      ],
+      name: 'SigAgentStream',
+    },
+  ],
+  records: [
+    {
+      fields: [
+        {
+          name: 'provider',
+          type: {
+            kind: 'enum',
+            name: 'SigAgentProvider',
+          },
+        },
+        {
+          name: 'model',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'base_url',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'target_node_id',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'api_key',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'brave_api_key',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'SigAgentConfig',
+    },
+    {
+      fields: [
+        {
+          name: 'mode',
+          type: {
+            kind: 'enum',
+            name: 'SigAgentMode',
+          },
+        },
+        {
+          name: 'prompt',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'author',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+        {
+          name: 'history',
+          type: {
+            inner: {
+              kind: 'record',
+              name: 'SigHistoryMessage',
+            },
+            kind: 'sequence',
+          },
+        },
+        {
+          name: 'current_date',
+          type: {
+            inner: {
+              kind: 'string',
+            },
+            kind: 'optional',
+          },
+        },
+      ],
+      name: 'SigAgentRequest',
+    },
+    {
+      fields: [
+        {
+          name: 'role',
+          type: {
+            kind: 'enum',
+            name: 'SigHistoryRole',
+          },
+        },
+        {
+          name: 'author',
+          type: {
+            kind: 'string',
+          },
+        },
+        {
+          name: 'text',
+          type: {
+            kind: 'string',
+          },
+        },
+      ],
+      name: 'SigHistoryMessage',
+    },
+  ],
+  sdkVersion: '0.1.0-alpha.12',
+  uniffiVersion: '0.32.2',
+} as const;

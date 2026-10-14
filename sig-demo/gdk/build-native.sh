@@ -50,3 +50,22 @@ cargo +1.95.0 run --locked \
   "$NATIVE_DIR/target/release/libgoose_sdk.dylib" \
   "$GDK_DIR/generated/schema.json"
 node "$GDK_DIR/generate-types.node.mjs"
+
+# The application facade embeds the published goose-agent state machine.
+AGENT_DIR="$GDK_DIR/native-agent"
+cargo +1.95.0 build --release --locked \
+  --manifest-path "$AGENT_DIR/Cargo.toml" \
+  --target aarch64-apple-darwin --target-dir "$BUILD_DIR"
+mkdir -p "$AGENT_DIR/target/release"
+AGENT_LIBRARY="$AGENT_DIR/target/release/libsig_demo_agent.dylib"
+cp "$BUILD_DIR/aarch64-apple-darwin/release/libsig_demo_agent.dylib" \
+  "$AGENT_LIBRARY.building"
+/usr/bin/install_name_tool -id '@rpath/libsig_demo_agent.dylib' "$AGENT_LIBRARY.building"
+/usr/bin/codesign --force --sign - "$AGENT_LIBRARY.building"
+mv -f "$AGENT_LIBRARY.building" "$AGENT_LIBRARY"
+mkdir -p "$GDK_DIR/generated-agent"
+cargo +1.95.0 run --locked \
+  --manifest-path "$GDK_DIR/bindgen/Cargo.toml" \
+  --target-dir "$WORKSPACE_DIR/.sig-demo/gdk-bindgen-build" -- \
+  "$AGENT_LIBRARY" "$GDK_DIR/generated-agent/schema.json" sig_demo_agent
+node "$GDK_DIR/generate-types.node.mjs" "$GDK_DIR/generated-agent"

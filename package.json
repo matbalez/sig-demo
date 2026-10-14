@@ -119,7 +119,9 @@
     "changeset:version": "changeset version && pnpm install --lockfile-only",
     "changeset:publish": "changeset publish",
     "demo:gdk:test:native": "node sig-demo/gdk/native-smoke.node.mjs",
-    "demo:gdk:test:electron": "electron sig-demo/gdk/native-smoke.main.mjs"
+    "demo:gdk:test:electron": "electron sig-demo/gdk/native-smoke.main.mjs",
+    "demo:agent:test:native": "node sig-demo/gdk/agent-smoke.node.mjs",
+    "demo:agent:test:electron": "electron sig-demo/gdk/agent-smoke.main.mjs"
   },
   "optionalDependencies": {
     "fs-xattr": "0.4.0"

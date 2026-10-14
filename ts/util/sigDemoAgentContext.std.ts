@@ -3,53 +3,12 @@
 
 import type { MessageAttributesType } from '../model-types.d.ts';
 import {
-  SIG_DEMO_AGENT_AUTHOR_MAX_BYTES,
-  SIG_DEMO_AGENT_HISTORY_MAX_BYTES,
-  SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES,
-  SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES,
+  SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES,
+  SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES,
   type SigDemoAgentHistoryMessageType,
 } from '../types/SigDemoAgent.std.ts';
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
-const TRUNCATED_TEXT_PREFIX = '[… earlier text omitted]\n';
-const truncatedTextPrefixBytes = encoder.encode(TRUNCATED_TEXT_PREFIX).length;
-
-function isUtf8ContinuationByte(byte: number | undefined): boolean {
-  return byte !== undefined && byte >= 0x80 && byte < 0xc0;
-}
-
-/** Keep display names bounded without cutting a Unicode character or using IDs. */
-export function normalizeSigDemoAgentAuthor(author: string): string {
-  const normalized = author.replace(/\s+/g, ' ').trim() || 'Participant';
-  const bytes = encoder.encode(normalized);
-  if (bytes.length <= SIG_DEMO_AGENT_AUTHOR_MAX_BYTES) {
-    return normalized;
-  }
-  let end = SIG_DEMO_AGENT_AUTHOR_MAX_BYTES - encoder.encode('…').length;
-  while (isUtf8ContinuationByte(bytes[end])) {
-    end -= 1;
-  }
-  return `${decoder.decode(bytes.subarray(0, end))}…`;
-}
-
-function truncateTextTail(text: string, maxBytes: number): string | undefined {
-  const bytes = encoder.encode(text);
-  if (bytes.length <= maxBytes) {
-    return text;
-  }
-  if (maxBytes <= truncatedTextPrefixBytes) {
-    return undefined;
-  }
-  let start = bytes.length - (maxBytes - truncatedTextPrefixBytes);
-  while (isUtf8ContinuationByte(bytes[start])) {
-    start += 1;
-  }
-  if (start >= bytes.length) {
-    return undefined;
-  }
-  return TRUNCATED_TEXT_PREFIX + decoder.decode(bytes.subarray(start));
-}
 
 function compareTimeline(
   left: Pick<MessageAttributesType, 'received_at' | 'sent_at'>,
@@ -102,12 +61,8 @@ function isUsefulContextMessage(
   );
 }
 
-/**
- * Select the newest useful text, then restore conversation timeline order.
- * A 6000-byte author/text budget estimates roughly 2000 tokens at UTF-8 bytes / 3;
- * it also bounds non-Latin text without splitting Unicode characters.
- */
-export function buildSigDemoAgentHistory({
+/** Collect eligible Signal records; the native agent selects its context window. */
+export function collectSigDemoAgentHistoryCandidates({
   messages,
   query,
   getAuthor,
@@ -127,31 +82,25 @@ export function buildSigDemoAgentHistory({
       (left, right) =>
         compareTimeline(right, left) || right.id.localeCompare(left.id)
     );
-  const history: Array<SigDemoAgentHistoryMessageType> = [];
+  const candidates: Array<SigDemoAgentHistoryMessageType> = [];
   let usedBytes = 0;
   for (const message of recent) {
-    if (history.length >= SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES) {
+    if (candidates.length >= SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES) {
       break;
     }
-    const author = message.sigDemoAgentResponse
-      ? 'Sig'
-      : normalizeSigDemoAgentAuthor(getAuthor(message));
-    const authorBytes = encoder.encode(author).length;
-    const textBudget =
-      Math.min(
-        SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES,
-        SIG_DEMO_AGENT_HISTORY_MAX_BYTES - usedBytes
-      ) - authorBytes;
-    const text = truncateTextTail(message.body?.trim() ?? '', textBudget);
-    if (!text) {
+    const author = message.sigDemoAgentResponse ? 'Sig' : getAuthor(message);
+    const text = message.body ?? '';
+    const bytes = encoder.encode(author).length + encoder.encode(text).length;
+    // This bounds IPC transport only. Rust owns trimming and prompt budgets.
+    if (usedBytes + bytes > SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES) {
       break;
     }
-    history.push({
+    candidates.push({
       role: message.sigDemoAgentResponse ? 'assistant' : 'user',
       author,
       text,
     });
-    usedBytes += authorBytes + encoder.encode(text).length;
+    usedBytes += bytes;
   }
-  return history.reverse();
+  return candidates.reverse();
 }

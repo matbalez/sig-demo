@@ -41,7 +41,7 @@ const stubs = new Map([
     `export const existsSync = path => globalThis.${harnessKey}.exists(path);
      export const readFileSync = path => globalThis.${harnessKey}.read(path);`,
   ],
-  ['bindings.node.ts', 'export const loadGdk = () => ({})'],
+  ['agent-bindings.node.ts', 'export const loadSigAgent = () => ({})'],
   [
     'SigDemoAgentRuntime.node.ts',
     `export const createSigDemoAgentRuntime = () => ({

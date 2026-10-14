@@ -4,14 +4,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { TextEncoder } from 'node:util';
+import { collectSigDemoAgentHistoryCandidates } from '../ts/util/sigDemoAgentContext.std.ts';
 import {
-  buildSigDemoAgentHistory,
-  normalizeSigDemoAgentAuthor,
-} from '../ts/util/sigDemoAgentContext.std.ts';
-import {
-  SIG_DEMO_AGENT_AUTHOR_MAX_BYTES,
-  SIG_DEMO_AGENT_HISTORY_MAX_BYTES,
-  SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES,
+  SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES,
+  SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES,
 } from '../ts/types/SigDemoAgent.std.ts';
 
 const now = 1728880000000;
@@ -38,7 +34,7 @@ function message(receivedAt, overrides = {}) {
   };
 }
 function history(messages, overrides = {}) {
-  return buildSigDemoAgentHistory({
+  return collectSigDemoAgentHistoryCandidates({
     messages,
     query,
     getAuthor,
@@ -126,44 +122,44 @@ await test('only ordinary text and completed Sig replies enter context', () => {
   assert.equal(history([message(90, { expireTimer: 30 })]).length, 1);
 });
 
-await test('selects the newest twelve useful messages and restores chronological order', () => {
-  const messages = Array.from({ length: 18 }, (_, index) => message(index + 1));
+await test('collects chronological candidates without applying the native twelve-message window', () => {
+  const messages = Array.from({ length: 70 }, (_, index) => message(index + 1));
   const selected = history(messages.reverse());
-  assert.equal(selected.length, 12);
+  assert.equal(selected.length, SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES);
   assert.deepEqual(
     selected.map(entry => entry.text),
-    Array.from({ length: 12 }, (_, index) => `text ${index + 7}`)
+    Array.from({ length: 60 }, (_, index) => `text ${index + 11}`)
   );
-  assert.deepEqual(
-    messages.map(entry => entry.received_at),
-    Array.from({ length: 18 }, (_, index) => 18 - index)
-  );
+  assert.equal(messages[0].received_at, 70);
 });
 
-await test('UTF-8 budget includes authors and keeps long-message tails visibly truncated', () => {
+await test('passes untrimmed Unicode text and names to Rust while bounding IPC bytes', () => {
   const messages = Array.from({ length: 10 }, (_, index) =>
     message(index + 1, {
       body: `Old opening ${'🪿漢'.repeat(600)} recent ending ${index + 1}`,
     })
   );
   const selected = history(messages, { getAuthor: () => '🪿'.repeat(100) });
-  assert.equal(selected.length, 4);
-  assert.deepEqual(
-    selected.map(entry => entry.text.match(/recent ending (\d+)$/)?.[1]),
-    ['7', '8', '9', '10']
+  assert.equal(selected.length, 10);
+  assert.ok(selected.every(entry => entry.text.startsWith('Old opening')));
+  assert.ok(selected.every(entry => entry.author === '🪿'.repeat(100)));
+  assert.ok(
+    selected.reduce((bytes, entry) => bytes + byteLength(entry.text), 0) > 6000
   );
-  let totalBytes = 0;
-  for (const entry of selected) {
-    const bytes = byteLength(entry.author) + byteLength(entry.text);
-    assert.ok(bytes <= SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES);
-    assert.ok(byteLength(entry.author) <= SIG_DEMO_AGENT_AUTHOR_MAX_BYTES);
-    assert.ok(entry.text.startsWith('[… earlier text omitted]\n'));
-    assert.ok(!entry.text.includes('Old opening'));
-    assert.ok(!entry.text.includes('�'));
-    assert.ok(!entry.author.includes('�'));
-    totalBytes += bytes;
-  }
-  assert.ok(totalBytes <= SIG_DEMO_AGENT_HISTORY_MAX_BYTES);
-  assert.equal(normalizeSigDemoAgentAuthor('  Alice\nSmith  '), 'Alice Smith');
-  assert.equal(normalizeSigDemoAgentAuthor(''), 'Participant');
+  const large = history(
+    Array.from({ length: 40 }, (_, index) =>
+      message(index + 1, {
+        body: 'x'.repeat(150000),
+      })
+    )
+  );
+  assert.ok(large.length < 40);
+  assert.ok(
+    large.reduce(
+      (bytes, entry) =>
+        bytes + byteLength(entry.author) + byteLength(entry.text),
+      0
+    ) <= SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES
+  );
+  assert.ok(large.every(entry => entry.text.length === 150000));
 });

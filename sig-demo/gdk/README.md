@@ -1,128 +1,115 @@
-# Native GDK in sig demo
+# Native Goose agent in sig demo
 
-Sig demo loads **Goose Development Kit 0.1.0-alpha.12** into the Electron main
-process. The SDK itself builds `libgoose_sdk.dylib` and exports its existing
-**UniFFI 0.32.2** interface. There is no agent helper executable, subprocess
-protocol, or application-specific Rust API.
+Sig demo embeds the published **`goose-agent` 0.1.0-alpha.12** crate in the
+Electron main process. Its real `StateMachine`, `InferenceRunner`, and
+`ToolOperation` manage each query. The application exposes that runtime through
+**UniFFI 0.32.2**, called from TypeScript using **Koffi 3.3.3**.
 
-`bindings.node.ts` calls that interface through **Koffi 3.3.3**, a generic Node
-FFI library. Koffi provides the native calling mechanism; the checked-in
-TypeScript code implements UniFFI buffers, records, enums, handles, and futures.
-The agent's TypeScript runtime uses native GDK providers and streams directly.
+## Responsibilities
 
-## Source and generated interface
+Signal reads eligible text records from its own chat database and supplies the
+current question, display name, recent candidate messages, and current date.
+It excludes deleted/expired messages, attachments, unfinished Sig replies, and
+messages outside the chat or after the question. The IPC boundary permits up to
+60 candidate records within a transport byte limit.
 
-- `native/Cargo.toml` pins the real SDK dependency. `build-native.sh` builds the
-  SDK package's existing `cdylib`, rather than defining new Rust exports.
-- `native/vendor/goose-provider-types` retains the small formatter patches for
-  OpenAI Responses built-in web search/citations and paid mesh streams that
-  interleave usage reports while generating tool arguments. Its notice describes
-  the patches; native GDK owns provider requests and response parsing.
-- `bindgen/src/main.rs` uses official `uniffi_bindgen` library metadata extraction
-  to read the compiled SDK's interface. `generated/schema.json` contains the
-  exact exported C symbols, interface checksums, fields, variants, and defaults.
-- `generate-types.node.mjs` emits `generated/types.std.ts` and
-  `generated/schema.std.ts` from that metadata. They are generated files, not a
-  parallel handwritten SDK API.
-- `codec.node.ts` implements UniFFI's big-endian wire representation.
-- `bindings.node.ts` validates the UniFFI contract and every interface checksum
-  before constructing a provider. It exposes synchronous provider factories,
-  `Provider.stream`, `complete`, model metadata, compaction, and
-  `ProviderStream.nextChunk`.
-- `index.ts` is the public import for the TypeScript agent runtime.
+The **native agent** selects the actual context window: up to 12 recent messages,
+6,000 UTF-8 bytes including authors, with each entry bounded to 1,500 bytes.
+It normalizes display names, preserves useful message tails, constructs Sig's
+system/tool prompts, and seeds the state-machine conversation. Prior chat is
+quoted background data; the current question is identified explicitly. Each
+invocation creates an independent in-memory session. Signal remains the source
+of chat history; the agent has no separate persistent memory.
 
-The generated schema includes the SDK's full metadata. The public object
-facades currently expose the provider and stream methods used by sig demo; SDK
-callback interfaces and its independent decision API are not application APIs.
+```mermaid
+flowchart TD
+    UI[Signal chat UI] <-->|IPC: chat records and events| TS[TypeScript adapter]
+    TS <-->|UniFFI via Koffi| SM[Rust goose-agent StateMachine]
+    SM --> C[Native Sig context and prompt operation]
+    SM --> I[Goose InferenceRunner]
+    SM --> T[Goose ToolOperation]
+    I <--> P[Native GDK model provider]
+    P <--> M[Local mesh-llm sidecar]
+    P <--> O[OpenAI Responses API]
+    T <--> B[Native Brave search tool]
+```
 
-## Build and regenerate
+The TypeScript adapter forwards native text, status, timing, and terminal events.
+It does not build model prompts, execute tools, or request model continuations.
 
-On Apple Silicon macOS, with the repository's Node dependencies installed and
-Rust 1.95.0 available:
+## Native integration
+
+- `native-agent/src/lib.rs` defines the small application UniFFI interface:
+  `start_sig_agent(config, request)`, and an owned stream with `next_event`,
+  `cancel`, and asynchronous `shutdown`.
+- `native-agent/src/runtime.rs` registers native operations and calls the
+  upstream `StateMachine::run`. Session loading and effect application keep
+  conversation and tool results within that invocation.
+- `native-agent/src/context.rs` owns context selection and prompt contributions.
+- `native-agent/src/brave.rs` calls Brave's LLM Context endpoint directly from
+  Rust with bounded results and a local credential. Goose's `ToolOperation`
+  executes it. ChatGPT uses OpenAI's built-in search instead.
+- `native-agent/src/compat_provider.rs` preserves the observed mesh tool-call
+  aliases and text-format compatibility while retaining provider metadata.
+- Native limits permit at most two searches and three model turns. Another
+  model request requires a newly completed search; ordinary answers use one.
+  No inference is sent as an agent-planning preflight.
+- Free-mesh warming is a native warmup mode sharing the same prompts and tool
+  schema. Paid mesh is connected without a synthetic inference warmup.
+
+The mesh sidecar still owns discovery, routing, wallet state, and payments.
+The native agent only calls its loopback inference endpoint. The approved
+private demo keys remain in the packaged runtime configuration; mesh requests
+do not receive an OpenAI key, and the Brave key is sent only to Brave.
+
+## Bindings and build
+
+`uniffi-runtime.node.ts` and `codec.node.ts` implement UniFFI buffers, records,
+enums, opaque object handles, and Rust futures. The codec copies returned
+buffers into V8-owned memory before freeing Rust memory, as required by
+Electron's V8 memory cage. Each namespace validates the native contract and
+interface checksums before calls are made.
+
+`agent-bindings.node.ts` is the typed facade for `libsig_demo_agent.dylib`.
+`bindgen/src/main.rs` uses official `uniffi_bindgen` metadata extraction;
+`generate-types.node.mjs` generates `generated-agent/` types and ABI metadata.
+These descriptors come from the actual native library.
+
+Build with Rust 1.95.0 and Node 24.21.0:
 
 ```sh
 sh sig-demo/gdk/build-native.sh
 ```
 
-This builds the pinned SDK, copies the native library to
-`sig-demo/gdk/native/target/release/libgoose_sdk.dylib`, creates an ignored
-official Python binding reference in `.sig-demo/gdk-uniffi-reference`, extracts
-metadata, and regenerates TypeScript types. The packaged app includes the same
-library under `Resources/sig-demo-gdk/`. Native binaries and build caches are
-ignored; the source, lockfiles, metadata, and generated TypeScript are committed.
+The script also retains the original provider-only SDK library and bindings for
+development smoke checks. The app loads and packages the native agent library
+under `Resources/sig-demo-gdk/libsig_demo_agent.dylib`.
 
-To regenerate only the TypeScript interface from an already-built library:
+The provider-types vendor patches preserve OpenAI Responses built-in search and
+citations, and assemble streamed tools across paid mesh's intermediate billing
+usage frames. See `native/vendor/goose-provider-types/SIG_DEMO_PATCH.md`.
 
-```sh
-cargo +1.95.0 run --locked \
-  --manifest-path sig-demo/gdk/bindgen/Cargo.toml \
-  --target-dir .sig-demo/gdk-bindgen-build -- \
-  sig-demo/gdk/native/target/release/libgoose_sdk.dylib \
-  sig-demo/gdk/generated/schema.json
-node sig-demo/gdk/generate-types.node.mjs
-```
+## Cancellation and verification
 
-The codec checks can run without a native library or network:
+An `AbortSignal` cancels the pending UniFFI future and signals the native agent.
+The adapter awaits native `shutdown()` before disposing its stream or completing
+the request. Provider switching therefore waits for native work to release its
+I/O before changing the mesh process or spending policy. `Drop` provides an
+abort fallback. Loaded libraries and registered callbacks remain alive for the
+process lifetime.
 
-```sh
-node --experimental-strip-types --test sig-demo/gdk/codec_test.node.mjs
-```
-
-The application test suite additionally checks agent behavior with mock bindings;
-native Node and Electron smoke tests exercise the actual dylib against local
-mock HTTP endpoints, including cancellation and built-in OpenAI search.
-
-The opt-in native smoke needs the built library above and Node 24 or the
-repository's bundled Electron. Run both from the repository root:
+Tests use synthetic local model responses and fake credentials. Rust checks
+cover native tools and state-machine behavior; Node/Electron checks exercise
+the compiled library through the actual TypeScript UniFFI bindings. No paid
+inference is needed for these checks.
 
 ```sh
-node sig-demo/gdk/native-smoke.node.mjs
-ELECTRON_RUN_AS_NODE=1 \
-  node_modules/electron/dist/Electron.app/Contents/MacOS/Electron \
-  sig-demo/gdk/native-smoke.node.mjs
+pnpm run demo:test
+cargo +1.95.0 test --locked --manifest-path sig-demo/gdk/native-agent/Cargo.toml
+pnpm run demo:agent:test:native
+pnpm run demo:agent:test:electron
 ```
 
-The script can also run from another working directory; its default library is
-resolved relative to its own file. Pass a library path as its first argument to
-check a packaged copy. It uses only fake keys and a temporary localhost HTTP
-server. It never launches mesh-llm, opens an app profile, or accesses a wallet.
-It checks native streaming and completion, JavaScript responsiveness, tool
-argument assembly and signed metadata replay, cancellation closing sockets,
-the OpenAI Responses search/citation patch, and zero outstanding native objects,
-futures, or polls after cleanup. It also verifies ambient OpenAI credentials
-are absent from mesh requests. Running under Electron catches its prohibition
-on external ArrayBuffers; returned Rust buffers use a copying decode instead.
-
-## Ownership and cancellation
-
-Arguments use the SDK's UniFFI record types: message content and stream chunks
-have their original variant names in a `kind` discriminator. Field names are
-camelCase. Optional values accept `null` or omission. A `u64` input accepts a
-safe integer or `bigint`; decoded `u64` values are `bigint`.
-
-Rust owns lowered argument buffers and cloned object handles once a scaffold
-call starts. Returned buffers are copied and freed exactly once. Each provider
-and stream owns a native handle and has an idempotent `dispose()` method; a
-finalizer is a fallback rather than the normal cleanup path. Async calls clone
-their receiver handle, so disposing the JavaScript owner does not invalidate a
-pending native call.
-
-Async calls poll real UniFFI Rust futures through a long-lived registered
-continuation. Rust thread callbacks resolve JavaScript promises; they do not
-block or recursively poll the Electron main thread. `AbortSignal` cancellation
-cancels and frees the pending future. GDK's `AbortOnDrop` then aborts its spawned
-Tokio task. A shared Node timer keeps the event loop alive only while native
-futures are pending and is cleared when the last future is freed. The agent also
-disposes the native stream in `finally`, releasing the response stream after
-cancellation.
-
-The library, Tokio runtime, and registered callback stay loaded for the process
-lifetime. Late wake callbacks from cancelled polls are safely ignored. The
-binding's `diagnostics()` reports active future, object, and pending poll counts
-for lifecycle tests. Native errors expose a typed `GooseError.kind`; their
-raw details are not included in the default error message.
-
-References: [GDK SDK](https://goose-docs.ai/docs/gdk/sdk/),
-[UniFFI library metadata generation](https://mozilla.github.io/uniffi-rs/latest/tutorial/foreign_language_bindings.html),
-[UniFFI async FFI](https://mozilla.github.io/uniffi-rs/latest/internals/async-ffi.html),
-[Koffi callbacks](https://koffi.dev/callbacks).
+References: [GDK overview](https://goose-docs.ai/docs/gdk/),
+[Goose agent state machines](https://goose-docs.ai/blog/2026/09/16/agentic-state-machines/),
+[UniFFI async FFI](https://mozilla.github.io/uniffi-rs/latest/internals/async-ffi.html).

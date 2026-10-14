@@ -9,10 +9,10 @@ export type SigDemoInferenceProviderType =
 export const SIG_DEMO_DEFAULT_INFERENCE_PROVIDER: SigDemoInferenceProviderType =
   'mesh-llm';
 
-export const SIG_DEMO_AGENT_HISTORY_MAX_MESSAGES = 12;
-export const SIG_DEMO_AGENT_HISTORY_MAX_BYTES = 6000;
-export const SIG_DEMO_AGENT_HISTORY_MESSAGE_MAX_BYTES = 1500;
-export const SIG_DEMO_AGENT_AUTHOR_MAX_BYTES = 96;
+// The native Goose agent owns model context limits. These bound IPC input only.
+export const SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_MESSAGES = 60;
+export const SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES = 3 * 1024 * 1024;
+export const SIG_DEMO_AGENT_INPUT_AUTHOR_MAX_BYTES = 4096;
 
 export type SigDemoAgentHistoryMessageType = Readonly<{
   role: 'user' | 'assistant';

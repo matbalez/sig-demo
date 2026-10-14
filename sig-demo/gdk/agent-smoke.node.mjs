@@ -1,0 +1,357 @@
+// Copyright 2026 sig demo contributors
+// SPDX-License-Identifier: AGPL-3.0-only
+
+// Opt-in real native Goose agent / UniFFI / Koffi integration smoke. All model
+// responses come from this synthetic loopback server. No app, mesh, wallet,
+// Brave service or OpenAI service is accessed.
+import assert from 'node:assert/strict';
+import { Buffer } from 'node:buffer';
+import { existsSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { resolve } from 'node:path';
+import { performance } from 'node:perf_hooks';
+import process from 'node:process';
+import { clearInterval, setInterval } from 'node:timers';
+import { setTimeout as delay } from 'node:timers/promises';
+import { fileURLToPath, URL } from 'node:url';
+import { loadSigAgent } from './agent-bindings.node.ts';
+
+const libraryPath = process.argv[2]
+  ? resolve(process.argv[2])
+  : fileURLToPath(
+      new URL(
+        './native-agent/target/release/libsig_demo_agent.dylib',
+        import.meta.url
+      )
+    );
+assert.ok(existsSync(libraryPath), 'Build the native agent first.');
+
+const ambientKey = 'sk-synthetic-ambient-never-send';
+const braveKey = 'synthetic-brave-never-send';
+process.env.OPENAI_API_KEY = ambientKey;
+process.env.BRAVE_SEARCH_API_KEY = braveKey;
+const target = 'a'.repeat(64);
+const requests = [];
+const validations = [];
+const sockets = new Set();
+let phase = 'setup';
+let cancelledSocket = false;
+const frames = values =>
+  values.map(value => `data: ${JSON.stringify(value)}\n\n`).join('') +
+  'data: [DONE]\n\n';
+const chunk = (model, delta, finishReason = null, usage) => ({
+  model,
+  choices: [{ index: 0, delta, finish_reason: finishReason }],
+  ...(usage && { usage }),
+});
+const usage = { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 };
+const server = createServer(async (request, response) => {
+  try {
+    let input = '';
+    for await (const data of request) input += data;
+    const body = JSON.parse(input);
+    requests.push(body.model);
+    assert.equal(request.url, '/v1/chat/completions');
+    assert.equal(request.headers.authorization, undefined);
+    assert.equal(request.headers['x-mesh-target'], target);
+    assert.ok(!input.includes(ambientKey));
+    assert.ok(!input.includes(braveKey));
+    assert.equal(body.stream, true);
+    assert.equal(body.parallel_tool_calls, false);
+    assert.deepEqual(body.chat_template_kwargs, { enable_thinking: false });
+    if (body.model === 'context-mock') {
+      const context = JSON.parse(
+        body.messages.find(message => message.role === 'user').content
+      );
+      assert.equal(context.currentRequest.text, 'Which one is largest?');
+      assert.equal(context.currentRequest.author, 'Alice Example');
+      assert.equal(context.currentDate, '2026-10-14');
+      assert.ok(context.recentHistory.length <= 12);
+      assert.ok(context.recentHistory.length > 0);
+      assert.ok(
+        context.recentHistory.reduce(
+          (total, message) =>
+            total +
+            Buffer.byteLength(message.author) +
+            Buffer.byteLength(message.text),
+          0
+        ) <= 6000
+      );
+      assert.ok(
+        context.recentHistory.every(
+          message =>
+            Buffer.byteLength(message.author) +
+              Buffer.byteLength(message.text) <=
+            1500
+        )
+      );
+      assert.ok(context.recentHistory.at(-1).text.includes('LATEST'));
+      assert.ok(
+        body.messages[0].content.includes('Answer only currentRequest.text')
+      );
+      assert.ok(body.messages[0].content.includes('quoted chat data'));
+    }
+    response.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      Connection: 'close',
+    });
+    if (body.model === 'pending-mock') {
+      response.flushHeaders();
+      response.once('close', () => {
+        cancelledSocket = true;
+      });
+      return;
+    }
+    if (body.model === 'invalid-tool-mock') {
+      assert.equal(body.tools[0].function.name, 'brave_web_search');
+      response.end(
+        frames([
+          chunk(body.model, {
+            tool_calls: [
+              {
+                index: 0,
+                id: 'synthetic-call',
+                type: 'function',
+                function: { name: 'brave_web_search', arguments: '{"query":' },
+              },
+            ],
+          }),
+          { model: body.model, choices: [], usage },
+          chunk(body.model, {
+            tool_calls: [{ index: 0, function: { arguments: '""}' } }],
+          }),
+          chunk(body.model, {}, 'tool_calls', usage),
+        ])
+      );
+      return;
+    }
+    if (body.model === 'invalid-stream-mock') {
+      response.end(
+        frames([
+          {
+            model: body.model,
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      function: {
+                        name: 'brave_web_search',
+                        arguments: { query: 'never executed' },
+                      },
+                    },
+                  ],
+                },
+                finish_reason: 'tool_calls',
+              },
+            ],
+          },
+        ])
+      );
+      return;
+    }
+    await delay(100);
+    response.end(
+      frames([
+        chunk(body.model, { content: 'Hydrogen' }),
+        { model: body.model, choices: [], usage },
+        chunk(body.model, { content: ' is first.' }),
+        chunk(body.model, {}, 'stop', usage),
+      ])
+    );
+  } catch (error) {
+    validations.push({
+      phase,
+      message:
+        error instanceof Error ? error.message : 'Fixture validation failed.',
+    });
+    response.destroy();
+  }
+});
+server.on('connection', socket => {
+  sockets.add(socket);
+  socket.once('close', () => sockets.delete(socket));
+});
+await new Promise((accept, reject) => {
+  server.once('error', reject);
+  server.listen(0, '127.0.0.1', accept);
+});
+const address = server.address();
+assert.ok(address && typeof address !== 'string');
+const baseUrl = `http://127.0.0.1:${address.port}/v1`;
+const agent = loadSigAgent(libraryPath);
+const config = (model, search = false) => ({
+  provider: 'MeshLlm',
+  model,
+  baseUrl,
+  targetNodeId: target,
+  apiKey: ambientKey,
+  ...(search && { braveApiKey: braveKey }),
+});
+const request = overrides => ({
+  mode: 'Answer',
+  prompt: 'What comes first?',
+  author: 'Alice',
+  history: [],
+  currentDate: '2026-10-14',
+  ...overrides,
+});
+const idle = () =>
+  assert.deepEqual(agent.diagnostics(), {
+    activeFutures: 0,
+    activeObjects: 0,
+    pendingPolls: 0,
+  });
+async function collect(stream) {
+  const events = [];
+  try {
+    for (;;) {
+      // Each read consumes the next native event in one ordered stream.
+      // oxlint-disable-next-line no-await-in-loop
+      const event = await stream.nextEvent();
+      if (!event) break;
+      events.push(event);
+    }
+    return events;
+  } finally {
+    await stream.shutdown();
+    stream.dispose();
+  }
+}
+const findings = {};
+try {
+  phase = 'plain';
+  let ticks = 0;
+  const ticker = setInterval(() => {
+    ticks += 1;
+  }, 5);
+  let events;
+  try {
+    events = await collect(await agent.start(config('plain-mock'), request()));
+  } finally {
+    clearInterval(ticker);
+  }
+  assert.equal(
+    events
+      .filter(event => event.kind === 'Text')
+      .map(event => event.text)
+      .join(''),
+    'Hydrogen is first.'
+  );
+  assert.ok(events.some(event => event.kind === 'Done'));
+  assert.ok(!events.some(event => event.kind === 'Error'));
+  assert.equal(requests.filter(model => model === 'plain-mock').length, 1);
+  assert.ok(ticks > 3, 'Native inference blocked the JavaScript event loop.');
+  findings.oneInferenceAndNonblockingStreaming = true;
+  idle();
+
+  phase = 'native-context';
+  events = await collect(
+    await agent.start(
+      config('context-mock'),
+      request({
+        prompt: 'Which one is largest?',
+        author: '  Alice   Example  ',
+        history: Array.from({ length: 20 }, (_, index) => ({
+          role: index % 2 ? 'Assistant' : 'User',
+          author: 'Participant',
+          text: `${index} ${'🙂'.repeat(600)} ${index === 19 ? 'LATEST' : ''}`,
+        })),
+      })
+    )
+  );
+  assert.ok(events.some(event => event.kind === 'Done'));
+  assert.equal(requests.filter(model => model === 'context-mock').length, 1);
+  findings.rustBuildsBoundedContextAndSystemPrompt = true;
+  idle();
+
+  phase = 'invalid-tool-with-usage';
+  events = await collect(
+    await agent.start(config('invalid-tool-mock', true), request())
+  );
+  assert.ok(events.some(event => event.kind === 'Error'));
+  assert.ok(!events.some(event => event.kind === 'Done'));
+  assert.ok(
+    !events.some(
+      event => event.kind === 'Status' && event.status === 'Searching'
+    )
+  );
+  assert.equal(
+    requests.filter(model => model === 'invalid-tool-mock').length,
+    1
+  );
+  findings.invalidToolAfterBillingUpdateDoesNotExecuteSearchOrRetry = true;
+  idle();
+
+  phase = 'invalid-stream';
+  events = await collect(
+    await agent.start(config('invalid-stream-mock', true), request())
+  );
+  assert.ok(events.some(event => event.kind === 'Error'));
+  assert.ok(
+    events.every(
+      event =>
+        !String(event.message ?? '').includes(ambientKey) &&
+        !String(event.message ?? '').includes(braveKey)
+    )
+  );
+  assert.equal(
+    requests.filter(model => model === 'invalid-stream-mock').length,
+    1
+  );
+  findings.nativeErrorEventIsSanitized = true;
+  idle();
+
+  phase = 'invalid-input';
+  const previous = requests.length;
+  events = await collect(
+    await agent.start(
+      config('never-called-mock'),
+      request({ currentDate: '2026-02-30' })
+    )
+  );
+  assert.ok(events.some(event => event.kind === 'Error'));
+  assert.equal(requests.length, previous);
+  findings.nativeValidationPrecedesInference = true;
+  idle();
+
+  phase = 'cancel';
+  const stream = await agent.start(config('pending-mock'), request());
+  try {
+    const deadline = performance.now() + 3000;
+    while (!requests.includes('pending-mock') && performance.now() < deadline) {
+      // Wait only for the local request to reach the fixture before cancelling.
+      // oxlint-disable-next-line no-await-in-loop
+      await delay(10);
+    }
+    assert.ok(requests.includes('pending-mock'));
+    stream.cancel();
+    await stream.shutdown();
+    const closedDeadline = performance.now() + 3000;
+    while (!cancelledSocket && performance.now() < closedDeadline) {
+      // The native cancellation must close its pending HTTP stream.
+      // oxlint-disable-next-line no-await-in-loop
+      await delay(10);
+    }
+    assert.ok(cancelledSocket);
+  } finally {
+    await stream.shutdown();
+    stream.dispose();
+  }
+  findings.cancellationDrainsNativeJobAndClosesSocket = true;
+  idle();
+  assert.deepEqual(validations, []);
+  process.stdout.write(
+    `${JSON.stringify({ ok: true, findings, requests: requests.length, diagnostics: agent.diagnostics() })}\n`
+  );
+} catch (error) {
+  process.stderr.write(
+    `${JSON.stringify({ ok: false, phase, error: error instanceof Error ? error.message : 'Native agent smoke failed.', validations, diagnostics: agent.diagnostics() })}\n`
+  );
+  process.exitCode = 1;
+} finally {
+  for (const socket of sockets) socket.destroy();
+  await new Promise(accept => server.close(accept));
+}

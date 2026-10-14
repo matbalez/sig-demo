@@ -21,15 +21,18 @@ Signal feature parity are outside this demo.
 Type `@sig` and a question in any chat to run that sender's local Sig agent.
 Everyone in the chat sees one Sig reply for that query, updated as text streams;
 the next question gets a separate reply. Responses travel through the existing
-encrypted direct or group messaging path. Sig receives the current question and
-up to 12 recent completed text messages from that chat, including earlier Sig
-answers. History has a 6,000-byte budget (roughly 2,000 tokens), with long messages
-shortened. Attachments, deleted or expired messages, and unfinished replies are
-excluded. Each invocation takes a fresh history snapshot; there is no separate
-persistent agent memory. See [native GDK integration](gdk/README.md).
+encrypted direct or group messaging path. Signal supplies the current question
+and eligible recent text records to the native `goose-agent` state machine. A
+native context operation selects up to 12 recent messages, including earlier Sig
+answers, within a 6,000-byte budget. It shortens long messages, constructs Sig's
+prompts, and keeps the current question separate from quoted chat history.
+Attachments, deleted or expired messages, and unfinished replies are excluded.
+The Rust state machine owns the conversation, tool execution, and model
+continuations for that query. There is no separate persistent agent memory.
+See [native Goose integration](gdk/README.md).
 
 With either **mesh-llm** option, Sig can call a local Brave web-search tool when a question needs
-current information or explicitly asks for a search. The local TypeScript agent sends a concise
+current information or explicitly asks for a search. The native Rust Goose agent sends a concise
 search query to Brave's LLM Context API and returns bounded excerpts and source
 URLs to the selected inference provider. It permits at most two searches per
 question and asks Sig to cite the source URLs. The approved Brave demo key is
