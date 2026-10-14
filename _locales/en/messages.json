@@ -1204,14 +1204,14 @@
     "description": "Shown when search could be a valid phone number, with one sub-item that will kick off the search"
   },
   "icu:welcomeToSignal": {
-    "messageformat": "Welcome to Signal"
+    "messageformat": "Welcome to sig demo"
   },
   "icu:whatsNew": {
     "messageformat": "See {whatsNew} in this update",
     "description": "Shown in the main window"
   },
   "icu:signalNonProfit": {
-    "messageformat": "Signal is a 501c3 nonprofit",
+    "messageformat": "Your private desktop demo",
     "description": "Shown at the bottom of the main window when a chat is not selected"
   },
   "icu:viewReleaseNotes": {
@@ -12092,6 +12092,46 @@
   "icu:WhatsNew__8.30--0": {
     "messageformat": "Thanks to a few performance improvements, your CPU will be slightly happier during video calls (even if you're not smiling).",
     "description": "(Deleted 2026/10/07)  Release notes for 8.30"
+  },
+  "icu:SigDemoRegistration--title": {
+    "messageformat": "sig demo",
+    "description": "Title of the private demo account creation screen"
+  },
+  "icu:SigDemoRegistration--description": {
+    "messageformat": "Join the private demo with your invitation. Choose a name your friends will recognize.",
+    "description": "Instructions for invitation account creation"
+  },
+  "icu:SigDemoRegistration--name": {
+    "messageformat": "Display name",
+    "description": "Label for the demo account name"
+  },
+  "icu:SigDemoRegistration--invite": {
+    "messageformat": "Invitation code",
+    "description": "Label for the private demo invitation"
+  },
+  "icu:SigDemoRegistration--create": {
+    "messageformat": "Create demo account",
+    "description": "Button to create a private demo account"
+  },
+  "icu:SigDemoRegistration--creating": {
+    "messageformat": "Creating your account…",
+    "description": "Progress label during demo account creation"
+  },
+  "icu:SigDemoRegistration--resume": {
+    "messageformat": "Continue account setup",
+    "description": "Button to resume interrupted demo account creation"
+  },
+  "icu:SigDemoRegistration--resume-description": {
+    "messageformat": "Your account setup was interrupted. Continue to finish setting up your demo account.",
+    "description": "Instructions for resuming an interrupted demo account registration"
+  },
+  "icu:SigDemoRegistration--invalid-invite": {
+    "messageformat": "This invitation is invalid or has already been used. Check the code and try again.",
+    "description": "Invalid or redeemed demo invitation error"
+  },
+  "icu:SigDemoRegistration--connection-error": {
+    "messageformat": "The demo account could not be created. Check that the demo server is running and try again.",
+    "description": "Demo account creation connection error"
   },
   "icu:WhatsNew__8.30--1": {
     "messageformat": "We also added a convenient shortcut to open your system settings on Windows if you try to join a video call and Signal doesn't have permission to access the camera. Now it's easier to see what you need to do so that people can see you.",

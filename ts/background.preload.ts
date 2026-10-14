@@ -299,6 +299,7 @@ import { Emoji } from './axo/emoji.std.ts';
 import { isTrustedContact } from './util/isConversationAccepted.preload.ts';
 import { registrationJobQueue } from './jobs/registrationJobQueue.preload.ts';
 import { PartialRegistrationType } from './types/StandaloneRegistration.std.ts';
+import { startSigDemoDirectory } from './services/sigDemoDirectory.preload.ts';
 import { PhoneNumberDiscoverability } from './util/phoneNumberDiscoverability.std.ts';
 import { getProfileData } from './state/ducks/standaloneInstaller.preload.ts';
 import { pinReminderService } from './services/pinReminder.preload.ts';
@@ -1617,7 +1618,12 @@ async function startApp(): Promise<void> {
       window.ConversationController.getOurConversation()
     );
 
-    if (isCoreDataValid && Registration.everDone()) {
+    if (
+      window.SignalContext.config.sigDemoEnabled &&
+      itemStorage.get('sigDemoRegistrationDraft')
+    ) {
+      window.reduxActions.app.openStandalone();
+    } else if (isCoreDataValid && Registration.everDone()) {
       idleDetector.start();
 
       const registrationPartialState = itemStorage.get(
@@ -1699,7 +1705,11 @@ async function startApp(): Promise<void> {
           try {
             await window.IPC.whenWindowVisible();
           } finally {
-            window.reduxActions.installer.startInstaller();
+            if (window.SignalContext.config.sigDemoEnabled) {
+              window.reduxActions.app.openStandalone();
+            } else {
+              window.reduxActions.installer.startInstaller();
+            }
           }
         })()
       );
@@ -2113,6 +2123,7 @@ async function startApp(): Promise<void> {
 
     reconnectBackOff.reset();
     drop(initializeGroupCredentialFetcher());
+    startSigDemoDirectory();
     drop(AttachmentDownloadManager.start());
 
     if (areRemoteBackupsTurnedOn()) {

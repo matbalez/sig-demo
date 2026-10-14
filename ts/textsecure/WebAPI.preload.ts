@@ -14,6 +14,8 @@ import qs from 'node:querystring';
 import {
   LibSignalErrorBase,
   ErrorCode,
+  Aci,
+  Pni,
   ServiceId,
   type KEMPublicKey,
   type PublicKey,
@@ -38,6 +40,7 @@ import type {
 } from '@signalapp/libsignal-client/dist/net/chat/SingleOutboundMessage';
 
 import { assertDev, strictAssert } from '../util/assert.std.ts';
+import { getSigDemoLocalChatPort } from '../util/sigDemoIsolation.std.ts';
 import * as durations from '../util/durations/index.std.ts';
 import type { ExplodePromiseResultType } from '../util/explodePromise.std.ts';
 import { explodePromise } from '../util/explodePromise.std.ts';
@@ -1095,6 +1098,36 @@ export type CreateAccountOptionsType = Readonly<{
   pniSignedPreKey: UploadSignedPreKeyType;
   pniPqLastResortPreKey: UploadKyberPreKeyType;
 }>;
+
+// Only the fields consumed by Desktop are needed for our private registration
+// endpoint. Upstream libsignal responses also satisfy this shape.
+export type PrimaryRegistrationResponseType = Pick<
+  RegisterAccountResponse,
+  'aci' | 'pni' | 'number' | 'storageCapable'
+>;
+
+export type CreateSigDemoAccountOptionsType = Omit<
+  CreateAccountOptionsType,
+  'number' | 'sessionId' | 'registrationLockToken'
+> & {
+  inviteCode: string;
+  displayName: string;
+  recoveryPassword: Uint8Array<ArrayBuffer>;
+};
+
+const sigDemoAccountResponseZod = z.object({
+  uuid: aciSchema,
+  pni: untaggedPniSchema,
+  number: z.string().regex(/^\+999\d{9,12}$/),
+  deviceId: z.literal(1),
+  storageCapable: z.literal(false),
+});
+
+const sigDemoDirectoryResponseZod = z.object({
+  accounts: z.array(
+    z.object({ uuid: aciSchema, displayName: z.string().min(1).max(100) })
+  ),
+});
 
 const linkDeviceResultZod = z.object({
   uuid: aciSchema,
@@ -2945,6 +2978,97 @@ export async function createAccount({
   });
 
   return response;
+}
+
+export async function createSigDemoAccount(
+  options: CreateSigDemoAccountOptionsType
+): Promise<PrimaryRegistrationResponseType> {
+  strictAssert(
+    window.SignalContext.config.sigDemoEnabled,
+    'sig demo is disabled'
+  );
+  getSigDemoLocalChatPort(chatServiceUrl, certificateAuthority);
+
+  // Use HTTPS directly: this private route is intentionally separate from
+  // libsignal's phone-number verification and registration websocket APIs.
+  const response = await _outerAjax(
+    new URL('/v1/sig-demo/accounts', chatServiceUrl).toString(),
+    {
+      certificateAuthority,
+      contentType: 'application/json; charset=utf-8',
+      type: 'POST',
+      redirect: 'error',
+      responseType: 'json',
+      version,
+      unauthenticated: true,
+      accessKey: undefined,
+      groupSendToken: undefined,
+      zodSchema: sigDemoAccountResponseZod,
+      data: JSON.stringify({
+        inviteCode: options.inviteCode,
+        displayName: options.displayName,
+        password: options.newPassword,
+        sessionId: '',
+        skipDeviceTransfer: true,
+        aciIdentityKey: Bytes.toBase64(options.aciPublicKey.serialize()),
+        pniIdentityKey: Bytes.toBase64(options.pniPublicKey.serialize()),
+        aciSignedPreKey: serializeSignedPreKey(options.aciSignedPreKey),
+        aciPqLastResortPreKey: serializeSignedPreKey(
+          options.aciPqLastResortPreKey
+        ),
+        pniSignedPreKey: serializeSignedPreKey(options.pniSignedPreKey),
+        pniPqLastResortPreKey: serializeSignedPreKey(
+          options.pniPqLastResortPreKey
+        ),
+        accountAttributes: {
+          fetchesMessages: true,
+          registrationId: options.registrationId,
+          pniRegistrationId: options.pniRegistrationId,
+          capabilities: {
+            attachmentBackfill: true,
+            spqr: true,
+            usernameChangeSyncMessage: true,
+            optionalPhoneNumber: false,
+          },
+          unidentifiedAccessKey: Array.from(options.accessKey),
+          unrestrictedUnidentifiedAccess: false,
+          discoverableByPhoneNumber: false,
+          recoveryPassword: Bytes.toBase64(options.recoveryPassword),
+        },
+      }),
+    }
+  );
+
+  return {
+    aci: Aci.parseFromServiceIdString(response.uuid),
+    pni: Pni.parseFromServiceIdString(`PNI:${response.pni}`),
+    number: response.number,
+    storageCapable: false,
+  };
+}
+
+export async function getSigDemoDirectory(): Promise<
+  z.infer<typeof sigDemoDirectoryResponseZod>
+> {
+  strictAssert(
+    window.SignalContext.config.sigDemoEnabled,
+    'sig demo is disabled'
+  );
+  getSigDemoLocalChatPort(chatServiceUrl, certificateAuthority);
+  strictAssert(username && password, 'A demo account must be authenticated');
+  return _outerAjax(
+    new URL('/v1/sig-demo/directory', chatServiceUrl).toString(),
+    {
+      certificateAuthority,
+      type: 'GET',
+      redirect: 'error',
+      responseType: 'json',
+      version,
+      user: username,
+      password,
+      zodSchema: sigDemoDirectoryResponseZod,
+    }
+  );
 }
 
 export async function linkDevice(

@@ -31,6 +31,7 @@ import type { AssertSameMembers } from './Util.std.ts';
 import type { Emoji } from '../axo/emoji.std.ts';
 import type { PartialRegistrationType } from './StandaloneRegistration.std.ts';
 import type { RegistrationQueueJobState } from '../jobs/registrationJobQueue.preload.ts';
+import type { SigDemoRegistrationDraft } from '../util/sigDemoRegistrationDraft.node.ts';
 
 export type AutoDownloadAttachmentType = {
   photos: boolean;
@@ -75,6 +76,7 @@ export type BlockedNumber = {
 };
 
 export type StorageAccessType = {
+  sigDemoRegistrationDraft: SigDemoRegistrationDraft;
   'always-relay-calls': boolean;
   'audio-notification': boolean;
   'auto-download-update': boolean;
@@ -470,6 +472,7 @@ export const STORAGE_KEYS_TO_PRESERVE_AFTER_UNLINK = [
 ] as const satisfies ReadonlyArray<keyof StorageAccessType>;
 
 export const STORAGE_KEYS_TO_PRESERVE_WHEN_PRIMARY = [
+  'sigDemoRegistrationDraft',
   'auto-download-attachment',
   'blocked-groups',
   'blocked-uuids',

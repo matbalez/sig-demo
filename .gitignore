@@ -49,3 +49,12 @@ ts/protobuf/*.d.ts
 /.zed
 *.sublime*
 *.map
+
+# sig demo local runtime, server secrets, invites, certificates, and databases
+/.sig-demo/
+/.pnpm-store/
+/sig-demo/server-data/
+/sig-demo/server/*.sqlite*
+/sig-demo/server/*.pem
+/sig-demo/server/*.key
+/config/sig-demo-private.json

@@ -21,6 +21,8 @@ import { getCountryDataForLocale } from '../../util/getCountryData.dom.ts';
 import { RegistrationStage } from '../../types/StandaloneRegistration.std.ts';
 import { getUpdatesState } from '../selectors/updates.std.ts';
 import { useUpdatesActions } from '../ducks/updates.preload.ts';
+import { SigDemoRegistration } from '../../components/SigDemoRegistration.dom.tsx';
+import type { StateType } from '../reducer.preload.ts';
 
 export const SmartStandaloneRegistration = memo(
   function SmartStandaloneRegistration() {
@@ -41,6 +43,7 @@ export const SmartStandaloneRegistration = memo(
       startRegistration,
       submitVerificationCode,
       verifyPIN,
+      registerSigDemoAccount,
       // AvatarEditor support
       deleteAvatarFromDisk: cachedDeleteAvatarFromDisk,
       replaceAvatar: cachedReplaceAvatar,
@@ -64,6 +67,20 @@ export const SmartStandaloneRegistration = memo(
     const workflow = useSelector(getWorkflow);
     const fatalError = useSelector(getFatalError);
     const direction = useSelector(getDirection);
+    const pendingDemoRegistration = useSelector(
+      (state: StateType) => state.items.sigDemoRegistrationDraft
+    );
+
+    if (window.SignalContext.config.sigDemoEnabled) {
+      return (
+        <SigDemoRegistration
+          i18n={i18n}
+          registerAccount={registerSigDemoAccount}
+          readyForUpdates={readyForUpdates}
+          pendingDisplayName={pendingDemoRegistration?.displayName}
+        />
+      );
+    }
 
     if (!workflow) {
       return undefined;

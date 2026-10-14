@@ -15,6 +15,7 @@ import {
   cancelInstall,
 } from './installer.preload.ts';
 import { startRegistration } from './standaloneInstaller.preload.ts';
+import { getSigDemoLocalChatPort } from '../../util/sigDemoIsolation.std.ts';
 
 const log = createLogger('app');
 
@@ -85,7 +86,16 @@ function openStandalone(
   OpenStandaloneActionType
 > {
   return async (dispatch, getState) => {
-    if (!window.SignalCI && getEnvironment() === Environment.PackagedApp) {
+    const { sigDemoEnabled, serverUrl, certificateAuthority } =
+      window.SignalContext.config;
+    if (sigDemoEnabled) {
+      getSigDemoLocalChatPort(serverUrl, certificateAuthority);
+    }
+    if (
+      !sigDemoEnabled &&
+      !window.SignalCI &&
+      getEnvironment() === Environment.PackagedApp
+    ) {
       log.warn(
         `openStandalone: refusing because environment is ${getEnvironment()}`
       );

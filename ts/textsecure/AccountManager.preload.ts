@@ -8,7 +8,6 @@ import {
   AccountEntropyPool,
   BackupKey,
 } from '@signalapp/libsignal-client/dist/AccountKeys.js';
-import type { RegisterAccountResponse } from '@signalapp/libsignal-client/dist/net';
 import { Base64 } from '@signalapp/types';
 
 import EventTarget from './EventTarget.std.ts';
@@ -23,9 +22,11 @@ import {
   startRegistration,
   finishRegistration,
   createAccount,
+  createSigDemoAccount,
   linkDevice,
   authenticate,
   type LinkDeviceResultType,
+  type PrimaryRegistrationResponseType,
 } from './WebAPI.preload.ts';
 import type {
   CompatPreKeyType,
@@ -75,6 +76,11 @@ import { drop } from '../util/drop.std.ts';
 import { isMoreRecentThan, isOlderThan } from '../util/timestamp.std.ts';
 import { ourProfileKeyService } from '../services/ourProfileKey.std.ts';
 import { strictAssert } from '../util/assert.std.ts';
+import { getSigDemoLocalChatPort } from '../util/sigDemoIsolation.std.ts';
+import {
+  restoreSigDemoRegistrationDraft,
+  serializeSigDemoRegistrationDraft,
+} from '../util/sigDemoRegistrationDraft.node.ts';
 import { getRegionCodeForNumber } from '../util/libphonenumberUtil.std.ts';
 import { isNotNil } from '../util/isNotNil.std.ts';
 import { missingCaseError } from '../util/missingCaseError.std.ts';
@@ -97,7 +103,8 @@ import {
   isRelinkingToSameAccount as getIsRelinkingToSameAccount,
   isCleanStart as getIsCleanStart,
 } from '../util/isRelinkingToSameAccount.std.ts';
-import type { PhoneNumberDiscoverability } from '../util/phoneNumberDiscoverability.std.ts';
+import { PhoneNumberDiscoverability } from '../util/phoneNumberDiscoverability.std.ts';
+import { HTTPError } from '../types/HTTPError.std.ts';
 
 const { isNumber, omit, orderBy } = lodash;
 
@@ -178,6 +185,7 @@ type CreatePrimaryDeviceOptionsType = Readonly<
     accessKey: Uint8Array<ArrayBuffer>;
 
     sessionId: string;
+    sigDemoInvite?: Readonly<{ inviteCode: string; displayName: string }>;
     registrationLockToken?: string;
     phoneNumberDiscoverability: PhoneNumberDiscoverability;
   } & (
@@ -296,7 +304,7 @@ export type ConfirmNumberResultType = Readonly<{
 export type CreateAccountReturnType =
   | {
       type: AccountType.Primary;
-      response: RegisterAccountResponse;
+      response: PrimaryRegistrationResponseType;
     }
   | {
       type: AccountType.Linked;
@@ -453,20 +461,31 @@ export default class AccountManager extends EventTarget {
     sessionId,
     registrationLockToken,
     phoneNumberDiscoverability,
+    sigDemoInvite,
   }: {
     number: string;
     sessionId: string;
     registrationLockToken?: string;
     phoneNumberDiscoverability: PhoneNumberDiscoverability;
-  }): Promise<RegisterAccountResponse> {
+    sigDemoInvite?: Readonly<{ inviteCode: string; displayName: string }>;
+  }): Promise<PrimaryRegistrationResponseType> {
     return this.#queueTask(async () => {
-      const aciKeyPair = generateKeyPair();
-      const pniKeyPair = generateKeyPair();
-      const profileKey = getRandomBytes(PROFILE_KEY_LENGTH);
+      const draft = sigDemoInvite
+        ? itemStorage.get('sigDemoRegistrationDraft')
+        : undefined;
+      const resumed = draft
+        ? restoreSigDemoRegistrationDraft(draft)
+        : undefined;
+      const aciKeyPair = resumed?.aciKeyPair ?? generateKeyPair();
+      const pniKeyPair = resumed?.pniKeyPair ?? generateKeyPair();
+      const profileKey =
+        resumed?.profileKey ?? getRandomBytes(PROFILE_KEY_LENGTH);
       const accessKey = deriveAccessKeyFromProfileKey(profileKey);
-      const accountEntropyPool = AccountEntropyPool.generate();
+      const accountEntropyPool =
+        resumed?.accountEntropyPool ?? AccountEntropyPool.generate();
       const masterKey = AccountEntropyPool.deriveSvrKey(accountEntropyPool);
-      const mediaRootBackupKey = BackupKey.generateRandom().serialize();
+      const mediaRootBackupKey =
+        resumed?.mediaRootBackupKey ?? BackupKey.generateRandom().serialize();
 
       const result = await this.#createAccount({
         type: AccountType.Primary,
@@ -484,6 +503,7 @@ export default class AccountManager extends EventTarget {
         readReceipts: true,
         registrationLockToken,
         phoneNumberDiscoverability,
+        sigDemoInvite,
       });
 
       if (result.type !== AccountType.Primary) {
@@ -493,6 +513,54 @@ export default class AccountManager extends EventTarget {
       }
 
       return result.response;
+    });
+  }
+
+  async registerSigDemoAccount({
+    inviteCode,
+    displayName,
+  }: {
+    inviteCode: string;
+    displayName: string;
+  }): Promise<void> {
+    strictAssert(
+      window.SignalContext.config.sigDemoEnabled,
+      'sig demo is disabled'
+    );
+    getSigDemoLocalChatPort(
+      window.SignalContext.config.serverUrl,
+      window.SignalContext.config.certificateAuthority
+    );
+    const draft = itemStorage.get('sigDemoRegistrationDraft');
+    if (draft) {
+      strictAssert(
+        draft.serverUrl === window.SignalContext.config.serverUrl &&
+          draft.certificateAuthority ===
+            window.SignalContext.config.certificateAuthority,
+        'The pending demo account belongs to a different private server'
+      );
+      if (registrationEverDone()) {
+        // Account keys are already committed; resume only profile/inbox setup.
+        return;
+      }
+    } else {
+      strictAssert(
+        !registrationEverDone(),
+        'A sig demo account is already registered'
+      );
+      strictAssert(inviteCode.trim().length > 0, 'An invitation is required');
+      strictAssert(displayName.trim().length > 0, 'A display name is required');
+    }
+    await this.registerAsPrimaryDevice({
+      // The private server assigns a synthetic compatibility identifier. These
+      // placeholders are never sent to the SMS or production registration API.
+      number: '',
+      sessionId: '',
+      phoneNumberDiscoverability: PhoneNumberDiscoverability.NotDiscoverable,
+      sigDemoInvite: {
+        inviteCode: draft?.inviteCode ?? inviteCode.trim(),
+        displayName: draft?.displayName ?? displayName.trim(),
+      },
     });
   }
 
@@ -1096,10 +1164,18 @@ export default class AccountManager extends EventTarget {
       'Either master key or AEP is necessary for registration'
     );
 
-    let password = Bytes.toBase64(getRandomBytes(16));
-    password = password.substring(0, password.length - 2);
-    const registrationId = generateRegistrationId();
-    const pniRegistrationId = generateRegistrationId();
+    const isSigDemo =
+      options.type === AccountType.Primary && options.sigDemoInvite;
+    const draft = isSigDemo
+      ? itemStorage.get('sigDemoRegistrationDraft')
+      : undefined;
+    const resumed = draft ? restoreSigDemoRegistrationDraft(draft) : undefined;
+    const password =
+      resumed?.password ??
+      Bytes.toBase64(getRandomBytes(16)).replace(/=+$/, '');
+    const registrationId = resumed?.registrationId ?? generateRegistrationId();
+    const pniRegistrationId =
+      resumed?.pniRegistrationId ?? generateRegistrationId();
 
     const previousNumber = itemStorage.user.getOptionalNumber();
     const previousAci = itemStorage.user.getAci();
@@ -1167,16 +1243,15 @@ export default class AccountManager extends EventTarget {
 
     let ourAci: AciString;
     let ourPni: PniString | undefined;
+    let number = options.number;
     let deviceId: number;
 
-    const aciPqLastResortPreKey = await this.#generateLastResortKyberKey(
-      ServiceIdKind.ACI,
-      aciKeyPair
-    );
-    const aciSignedPreKey = await this.#generateSignedPreKey(
-      ServiceIdKind.ACI,
-      aciKeyPair
-    );
+    const aciPqLastResortPreKey =
+      resumed?.aciPqLastResortPreKey ??
+      (await this.#generateLastResortKyberKey(ServiceIdKind.ACI, aciKeyPair));
+    const aciSignedPreKey =
+      resumed?.aciSignedPreKey ??
+      (await this.#generateSignedPreKey(ServiceIdKind.ACI, aciKeyPair));
 
     const aciKeysToUpload = {
       aciPqLastResortPreKey: kyberPreKeyToUploadSignedPreKey(
@@ -1199,14 +1274,18 @@ export default class AccountManager extends EventTarget {
       | undefined;
     if (options.hasE164) {
       pniKeysToSave = {
-        pniPqLastResortPreKey: await this.#generateLastResortKyberKey(
-          ServiceIdKind.PNI,
-          options.pniKeyPair
-        ),
-        pniSignedPreKey: await this.#generateSignedPreKey(
-          ServiceIdKind.PNI,
-          options.pniKeyPair
-        ),
+        pniPqLastResortPreKey:
+          resumed?.pniPqLastResortPreKey ??
+          (await this.#generateLastResortKyberKey(
+            ServiceIdKind.PNI,
+            options.pniKeyPair
+          )),
+        pniSignedPreKey:
+          resumed?.pniSignedPreKey ??
+          (await this.#generateSignedPreKey(
+            ServiceIdKind.PNI,
+            options.pniKeyPair
+          )),
       };
       pniKeysToUpload = {
         pniPqLastResortPreKey: kyberPreKeyToUploadSignedPreKey(
@@ -1222,27 +1301,101 @@ export default class AccountManager extends EventTarget {
     let authCredentialSalt: Uint8Array<ArrayBuffer> | undefined;
 
     if (options.type === AccountType.Primary) {
-      let response: Awaited<ReturnType<typeof createAccount>>;
+      let response: PrimaryRegistrationResponseType;
       if (options.hasE164) {
         strictAssert(
           pniKeysToUpload != null,
           'Must have PNI keys for E164 registration'
         );
-        response = await createAccount({
+        const sharedOptions = {
           newPassword: password,
           registrationId,
           accessKey: options.accessKey,
-          sessionId: options.sessionId,
           aciPublicKey: aciKeyPair.publicKey,
-          registrationLockToken: options.registrationLockToken,
           phoneNumberDiscoverability: options.phoneNumberDiscoverability,
 
-          number: options.number,
           pniRegistrationId,
           pniPublicKey: options.pniKeyPair.publicKey,
           ...aciKeysToUpload,
           ...pniKeysToUpload,
-        });
+        };
+        if (options.sigDemoInvite) {
+          strictAssert(
+            pniKeysToSave != null && options.accountEntropyPool != null,
+            'Missing demo registration keys'
+          );
+          const pendingDraft =
+            draft ??
+            serializeSigDemoRegistrationDraft(
+              {
+                ...options.sigDemoInvite,
+                serverUrl: window.SignalContext.config.serverUrl,
+                certificateAuthority:
+                  window.SignalContext.config.certificateAuthority,
+              },
+              {
+                aciKeyPair,
+                pniKeyPair: options.pniKeyPair,
+                profileKey,
+                accountEntropyPool: options.accountEntropyPool,
+                mediaRootBackupKey: options.mediaRootBackupKey,
+                password,
+                registrationId,
+                pniRegistrationId,
+                aciSignedPreKey,
+                aciPqLastResortPreKey,
+                ...pniKeysToSave,
+                recoveryPassword: getRandomBytes(32),
+              }
+            );
+          // Durable SQLCipher write precedes the one-time invite redemption.
+          await itemStorage.put('sigDemoRegistrationDraft', pendingDraft);
+          if (resumed) {
+            await Promise.all([
+              itemStorage.put(
+                SIGNED_PRE_KEY_ID_KEY[ServiceIdKind.ACI],
+                wrappingAdd24(aciSignedPreKey.keyId, 1)
+              ),
+              itemStorage.put(
+                SIGNED_PRE_KEY_ID_KEY[ServiceIdKind.PNI],
+                wrappingAdd24(pniKeysToSave.pniSignedPreKey.keyId, 1)
+              ),
+              itemStorage.put(
+                KYBER_KEY_ID_KEY[ServiceIdKind.ACI],
+                wrappingAdd24(aciPqLastResortPreKey.id(), 1)
+              ),
+              itemStorage.put(
+                KYBER_KEY_ID_KEY[ServiceIdKind.PNI],
+                wrappingAdd24(pniKeysToSave.pniPqLastResortPreKey.id(), 1)
+              ),
+            ]);
+          }
+          try {
+            response = await createSigDemoAccount({
+              ...sharedOptions,
+              ...options.sigDemoInvite,
+              recoveryPassword: Bytes.fromBase64(pendingDraft.recoveryPassword),
+            });
+          } catch (error) {
+            if (
+              error instanceof HTTPError &&
+              [400, 401, 403, 409].includes(error.code)
+            ) {
+              // A definitive rejection did not redeem this request. Allow the
+              // user to correct an invalid/expired invitation. Lost responses
+              // and ambiguous server failures retain the exact retry draft.
+              await itemStorage.remove('sigDemoRegistrationDraft');
+            }
+            throw error;
+          }
+        } else {
+          response = await createAccount({
+            ...sharedOptions,
+            sessionId: options.sessionId,
+            number: options.number,
+            registrationLockToken: options.registrationLockToken,
+          });
+        }
       } else {
         throw new Error('Unsupported E164-less registration');
       }
@@ -1251,6 +1404,7 @@ export default class AccountManager extends EventTarget {
         response.aci.getServiceIdString(),
         '#doCreateAccount'
       );
+      number = response.number ?? options.number;
       ourPni =
         response.pni == null
           ? undefined
@@ -1360,7 +1514,7 @@ export default class AccountManager extends EventTarget {
     await itemStorage.user.setCredentials({
       aci: ourAci,
       pni: ourPni,
-      number: options.number,
+      number,
       deviceId,
       deviceName: options.deviceName,
       password,
@@ -1374,7 +1528,7 @@ export default class AccountManager extends EventTarget {
     window.ConversationController.maybeMergeContacts({
       aci: ourAci,
       pni: ourPni,
-      e164: options.number,
+      e164: number,
       reason: 'createAccount',
     });
 
@@ -1455,8 +1609,11 @@ export default class AccountManager extends EventTarget {
 
     await itemStorage.put('read-receipt-setting', readReceipts);
 
-    if (options.number != null) {
-      const regionCode = getRegionCodeForNumber(options.number);
+    if (
+      number != null &&
+      !('sigDemoInvite' in options && options.sigDemoInvite)
+    ) {
+      const regionCode = getRegionCodeForNumber(number);
       await itemStorage.put('regionCode', regionCode);
     }
     await signalProtocolStore.hydrateCaches();

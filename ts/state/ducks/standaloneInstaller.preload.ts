@@ -196,6 +196,44 @@ export function cancelRegistration(): CancelWorkflowActionType {
   };
 }
 
+export function registerSigDemoAccount({
+  inviteCode,
+  displayName,
+}: {
+  inviteCode: string;
+  displayName: string;
+}): ThunkAction<
+  Promise<void>,
+  StateType,
+  unknown,
+  OpenInboxActionType | UpdateWorkflowActionType
+> {
+  return async (dispatch, getState) => {
+    await accountManager.registerSigDemoAccount({ inviteCode, displayName });
+    const registeredName =
+      itemStorage.get('sigDemoRegistrationDraft')?.displayName ??
+      displayName.trim();
+    await itemStorage.put(
+      'phoneNumberDiscoverability',
+      PhoneNumberDiscoverability.NotDiscoverable
+    );
+    await registrationJobQueue.add({
+      type: 'UploadProfile',
+      id: generateUuid(),
+      reason: 'sig demo account creation',
+      firstName: registeredName,
+    });
+    enableStorageService('sig demo account created');
+    runStorageServiceUploadJob({ reason: 'sig demo account created' });
+    window.IPC.removeSetupMenuItems();
+    await openInbox()(dispatch, getState, undefined);
+    // Profile upload is now durably queued and the account's private keys and
+    // credentials have been fully committed to this encrypted profile.
+    await itemStorage.remove('sigDemoRegistrationDraft');
+    dispatch({ type: UPDATE_WORKFLOW, payload: { workflow: undefined } });
+  };
+}
+
 export function moveToCaptchaStage({
   phoneNumber,
   waitNeeded,
@@ -1436,6 +1474,7 @@ function saveAvatarToDisk(
 }
 
 export const actions = {
+  registerSigDemoAccount,
   cancelRegistration,
   completeRegistration,
   createPIN,

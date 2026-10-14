@@ -1061,6 +1061,34 @@ importers:
         specifier: npm:@typescript/typescript6@6.0.2
         version: '@typescript/typescript6@6.0.2'
 
+  sig-demo/server:
+    dependencies:
+      '@signalapp/libsignal-client':
+        specifier: 0.100.0
+        version: 0.100.0
+      '@signalapp/mock-server':
+        specifier: workspace:*
+        version: link:../../packages/mock-server
+      micro:
+        specifier: 9.4.1
+        version: 9.4.1
+      tsx:
+        specifier: 4.23.0
+        version: 4.23.0
+      ws:
+        specifier: 8.21.0
+        version: 8.21.0(bufferutil@4.0.9)(utf-8-validate@5.0.10)
+    devDependencies:
+      '@types/node':
+        specifier: 24.12.0
+        version: 24.12.0
+      '@types/ws':
+        specifier: 8.18.1
+        version: 8.18.1
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+
   sticker-creator:
     dependencies:
       '@indutny/emoji-picker-react':

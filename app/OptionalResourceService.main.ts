@@ -19,6 +19,7 @@ import { getGotOptions } from '../ts/updater/got.main.ts';
 import { drop } from '../ts/util/drop.std.ts';
 import { parseUnknown } from '../ts/util/schemas.std.ts';
 import { getAppRootDir } from '../ts/util/appRootDir.main.ts';
+import config from './config.main.ts';
 
 const log = createLogger('OptionalResourceService');
 
@@ -61,6 +62,11 @@ export class OptionalResourceService {
 
     const decl = this.#declaration[name];
     if (!decl) {
+      return undefined;
+    }
+    // Optional upstream assets are unnecessary for the private messaging demo.
+    // Their bundled declarations contain Signal URLs, so do not fetch them.
+    if (config.get<boolean>('sigDemoEnabled')) {
       return undefined;
     }
 

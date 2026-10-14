@@ -3,7 +3,6 @@
 
 import { app } from 'electron';
 
-import { packageJson } from '../ts/util/packageJson.main.ts';
 import { createLogger } from '../ts/logging/log.std.ts';
 import * as GlobalErrors from './global_errors.main.ts';
 
@@ -15,7 +14,8 @@ GlobalErrors.addHandler();
 // set such that only we have read access to our files
 process.umask(0o077);
 
-export const AUMID = `org.whispersystems.${packageJson.name}`;
+// electron-builder removes development-only build settings from package.json.
+export const AUMID = 'dev.matbalez.sig-demo';
 log.info('Set Windows Application User Model ID (AUMID)', {
   AUMID,
 });

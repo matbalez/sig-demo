@@ -4,9 +4,7 @@
 import { Net } from '@signalapp/libsignal-client';
 
 import { getUserAgent } from '../util/getUserAgent.node.ts';
-import { isStagingServer } from '../util/isStagingServer.dom.ts';
-import { getMockServerPort } from '../util/getMockServerPort.dom.ts';
-import { isMockServer } from '../util/isMockServer.dom.ts';
+import { getSigDemoLocalChatPort } from '../util/sigDemoIsolation.std.ts';
 import { pemToDer } from '../util/pemToDer.std.ts';
 import { drop } from '../util/drop.std.ts';
 import { toLogFormat } from '../types/errors.std.ts';
@@ -21,35 +19,20 @@ function resolveLibsignalNet(
   version: string,
   certificateAuthority?: string
 ): Net.Net {
+  const port = getSigDemoLocalChatPort(url, certificateAuthority);
   const userAgent = getUserAgent(version);
   log.info(`libsignal net url: ${url}`);
-  if (isStagingServer(url)) {
-    log.info('libsignal net environment resolved to staging');
-    return new Net.Net({
-      env: Net.Environment.Staging,
-      userAgent,
-    });
-  }
-
-  if (isMockServer(url) && certificateAuthority !== undefined) {
-    const DISCARD_PORT = 9; // Reserved by RFC 863.
-    log.info('libsignal net environment resolved to mock');
-    return new Net.Net({
-      localTestServer: true,
-      userAgent,
-      TESTING_localServer_chatPort: parseInt(getMockServerPort(url), 10),
-      TESTING_localServer_cdsiPort: DISCARD_PORT,
-      TESTING_localServer_svr2Port: DISCARD_PORT,
-      TESTING_localServer_svrBPort: DISCARD_PORT,
-      TESTING_localServer_rootCertificateDer: pemToDer(certificateAuthority),
-      TESTING_localServer_httpVersion: 2,
-    });
-  }
-
-  log.info('libsignal net environment resolved to prod');
+  const DISCARD_PORT = 9; // Reserved by RFC 863.
+  log.info('libsignal net environment resolved to isolated local test server');
   return new Net.Net({
-    env: Net.Environment.Production,
+    localTestServer: true,
     userAgent,
+    TESTING_localServer_chatPort: port,
+    TESTING_localServer_cdsiPort: DISCARD_PORT,
+    TESTING_localServer_svr2Port: DISCARD_PORT,
+    TESTING_localServer_svrBPort: DISCARD_PORT,
+    TESTING_localServer_rootCertificateDer: pemToDer(certificateAuthority ?? ''),
+    TESTING_localServer_httpVersion: 2,
   });
 }
 
@@ -75,13 +58,7 @@ if (window.SignalContext.config?.serverUrl) {
 
   libsignalNet.setIpv6Enabled(!config.disableIPv6);
   if (config.proxyUrl) {
-    log.info('WebAPI: Setting libsignal proxy');
-    try {
-      libsignalNet.setProxyFromUrl(config.proxyUrl);
-    } catch (error) {
-      log.error(`WebAPI: Failed to set proxy: ${error}`);
-      libsignalNet.clearProxy();
-    }
+    throw new Error('sig demo local test transport must not use a proxy.');
   }
 
   drop(

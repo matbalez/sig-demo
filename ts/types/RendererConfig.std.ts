@@ -61,6 +61,7 @@ export const rendererConfigSchema = z.object({
   genericServerPublicParams: configRequiredStringSchema,
   backupServerPublicParams: configRequiredStringSchema,
   serverUrl: configRequiredStringSchema,
+  sigDemoEnabled: z.boolean(),
   sfuUrl: configRequiredStringSchema,
   storageUrl: configRequiredStringSchema,
   stripePublishableKey: configRequiredStringSchema,

@@ -2,38 +2,34 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 
 import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
 import { app } from 'electron';
 
 import { start } from './base_config.node.ts';
 import config from './config.main.ts';
 import * as Errors from '../ts/types/errors.std.ts';
-import OS from '../ts/util/os/osMain.node.ts';
+import {
+  SIG_DEMO_APP_NAME,
+  createSigDemoStorageDirectory,
+} from '../ts/util/sigDemoStorage.node.ts';
 
-let userData: string | undefined;
-// Use separate data directory for benchmarks & development
-if (config.has('storagePath')) {
-  userData = String(config.get('storagePath'));
-} else if (config.has('storageProfile')) {
-  userData = join(
+// Also separates the OS safeStorage/keychain identity in development builds.
+app.setName(SIG_DEMO_APP_NAME);
+let userData: string;
+try {
+  userData = createSigDemoStorageDirectory(
     app.getPath('appData'),
-    // oxlint-disable-next-line typescript/restrict-template-expressions
-    `Signal-${config.get('storageProfile')}`
+    config.get<unknown>('storageProfile'),
+    config.has('storagePath') ? config.get<unknown>('storagePath') : undefined
   );
-} else if (OS.isAppImage()) {
-  userData = join(app.getPath('appData'), `${app.getName()} AppImage`);
+} catch (error) {
+  // oxlint-disable-next-line no-console
+  console.error(
+    'Failed to create isolated sig demo data',
+    Errors.toLogFormat(error)
+  );
+  throw error;
 }
-
-if (userData !== undefined) {
-  try {
-    mkdirSync(userData, { recursive: true });
-  } catch (error) {
-    // oxlint-disable-next-line no-console
-    console.error('Failed to create userData', Errors.toLogFormat(error));
-  }
-
-  app.setPath('userData', userData);
-}
+app.setPath('userData', userData);
 
 // Use console.log because logger isn't fully initialized yet
 // oxlint-disable-next-line no-console

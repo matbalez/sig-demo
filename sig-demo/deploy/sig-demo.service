@@ -1,0 +1,19 @@
+[Unit]
+Description=Private Sig desktop demo backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/sig-demo/server
+ExecStart=/opt/sig-demo/node/bin/node --import tsx /opt/sig-demo/server/main.ts serve --data-dir /opt/sig-demo/data --port 8443 --public --host 0.0.0.0
+Restart=on-failure
+RestartSec=3
+Environment=NODE_ENV=production
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

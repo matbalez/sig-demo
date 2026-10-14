@@ -60,6 +60,9 @@ import './startup_config.main.ts';
 import type { RendererConfigType } from '../ts/types/RendererConfig.std.ts';
 import { rendererConfigSchema } from '../ts/types/RendererConfig.std.ts';
 import config from './config.main.ts';
+import { assertSigDemoNetworkConfig } from '../ts/util/sigDemoIsolation.std.ts';
+import { startSigDemoRelay } from '../ts/util/sigDemoRelay.node.ts';
+import type { SigDemoRelayConfig } from '../ts/util/sigDemoIsolation.std.ts';
 import {
   Environment,
   getEnvironment,
@@ -147,6 +150,21 @@ import { maybeMigrateSafeStorageBackend } from '../ts/util/linuxPasswordStoreMig
 const { chmod, realpath, writeFile } = fsExtra;
 const { get, pick, isNumber, isBoolean, some, debounce, noop } = lodash;
 
+// Fail closed even when a local config or NODE_CONFIG overrides shipped defaults.
+assertSigDemoNetworkConfig(config.util.toObject());
+for (const name of [
+  'HTTP_PROXY',
+  'http_proxy',
+  'HTTPS_PROXY',
+  'https_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+]) {
+  if (process.env[name]) {
+    throw new Error('sig demo local test transport must not use a proxy.');
+  }
+}
+
 const log = createLogger('app/main');
 const updaterLog = log.child('updater');
 
@@ -165,6 +183,7 @@ if (OS.isMacOS()) {
 let mainWindow: BrowserWindow | undefined;
 let mainWindowCreated = false;
 let loadingWindow: BrowserWindow | undefined;
+let sigDemoRelay: Awaited<ReturnType<typeof startSigDemoRelay>> | undefined;
 
 // These will be set after app fires the 'ready' event
 let preferredSystemLocales: Array<string> | undefined;
@@ -1239,6 +1258,11 @@ async function readyForUpdates() {
   // Discard value even if we don't handle a saved URL.
   macInitialOpenUrlRoute = undefined;
 
+  // The demo never starts the upstream Signal updater, including force-update.
+  if (!config.get<boolean>('updatesEnabled')) {
+    return;
+  }
+
   // Second, start checking for app updates
   try {
     strictAssert(
@@ -1272,6 +1296,10 @@ async function readyForUpdates() {
 }
 
 async function forceUpdate() {
+  if (!config.get<boolean>('updatesEnabled')) {
+    return;
+  }
+
   try {
     updaterLog.info('starting force update');
     await updater.force();
@@ -2187,6 +2215,25 @@ electronProtocol.registerSchemesAsPrivileged([
 // Some APIs can only be used after this event occurs.
 let ready = false;
 app.on('ready', async () => {
+  if (config.has('sigDemoRelay')) {
+    try {
+      sigDemoRelay = await startSigDemoRelay(
+        config.get<SigDemoRelayConfig>('sigDemoRelay'),
+        config.get<string>('serverUrl'),
+        config.get<string>('certificateAuthority')
+      );
+      app.once('will-quit', () => {
+        drop(sigDemoRelay?.close() ?? Promise.resolve());
+      });
+    } catch (error) {
+      log.error(
+        'sig demo private relay failed to start:',
+        Errors.toLogFormat(error)
+      );
+      app.exit(1);
+      return;
+    }
+  }
   dns.setFallback(await getDNSFallback());
   if (DISABLE_IPV6) {
     dns.setIPv6Enabled(false);
@@ -2748,24 +2795,8 @@ app.on(
   }
 );
 
-if (!app.isDefaultProtocolClient('sgnl')) {
-  log.info('setting signal as the default app for the sgnl url scheme');
-  app.setAsDefaultProtocolClient('sgnl');
-} else {
-  log.info(
-    'signal is already registered as the default app for the sgnl url scheme.'
-  );
-}
-if (!app.isDefaultProtocolClient('signalcaptcha')) {
-  log.info(
-    'setting signal as the default app for the signalcaptcha url scheme'
-  );
-  app.setAsDefaultProtocolClient('signalcaptcha');
-} else {
-  log.info(
-    'signal is already registered as the default app for the sgnl url scheme.'
-  );
-}
+// Keep the production Signal app's URL handlers intact. The demo does not
+// register sgnl or signalcaptcha, even when run directly from source.
 
 ipc.on('set-badge-count', (_event: Electron.Event, badgeCount: number) => {
   app.setBadgeCount(badgeCount);
@@ -2952,6 +2983,7 @@ ipc.on('get-config', async event => {
     buildExpiration: config.get<number>('buildExpiration'),
     challengeUrl: config.get<string>('challengeUrl'),
     serverUrl: config.get<string>('serverUrl'),
+    sigDemoEnabled: config.get<boolean>('sigDemoEnabled'),
     storageUrl: config.get<string>('storageUrl'),
     updatesUrl: config.get<string>('updatesUrl'),
     resourcesUrl: config.get<string>('resourcesUrl'),
