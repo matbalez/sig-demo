@@ -129,6 +129,115 @@ async fn native_machine_owns_context_and_ordinary_answer_is_one_inference() {
 }
 
 #[tokio::test]
+async fn native_openai_uses_v1_responses_with_search_and_streams_the_answer() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    listener.set_nonblocking(true).unwrap();
+    let host = format!("http://{}", listener.local_addr().unwrap());
+    let server = thread::spawn(move || {
+        let started = Instant::now();
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(connection) => break connection,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(started.elapsed() < Duration::from_secs(8));
+                    thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("{error}"),
+            }
+        };
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut bytes = Vec::new();
+        let header_end = loop {
+            let mut buffer = [0; 4096];
+            let read = stream.read(&mut buffer).unwrap();
+            assert!(read > 0);
+            bytes.extend_from_slice(&buffer[..read]);
+            if let Some(index) = bytes.windows(4).position(|value| value == b"\r\n\r\n") {
+                break index + 4;
+            }
+        };
+        let headers = String::from_utf8_lossy(&bytes[..header_end]).to_ascii_lowercase();
+        assert!(headers.starts_with("post /v1/responses http/1.1\r\n"));
+        assert!(!headers.contains("chat/completions"));
+        assert!(headers.contains("authorization: bearer synthetic-openai-key\r\n"));
+        let length: usize = headers
+            .lines()
+            .find_map(|line| line.strip_prefix("content-length: "))
+            .unwrap()
+            .parse()
+            .unwrap();
+        while bytes.len() < header_end + length {
+            let mut buffer = [0; 4096];
+            let read = stream.read(&mut buffer).unwrap();
+            assert!(read > 0);
+            bytes.extend_from_slice(&buffer[..read]);
+        }
+        let request: serde_json::Value =
+            serde_json::from_slice(&bytes[header_end..header_end + length]).unwrap();
+        assert_eq!(request["model"], "gpt-6-luna");
+        assert_eq!(request["stream"], true);
+        assert_eq!(request["store"], false);
+        assert_eq!(request["reasoning"]["effort"], "none");
+        assert_eq!(request["max_output_tokens"], 2048);
+        assert_eq!(request["max_tool_calls"], 2);
+        assert_eq!(
+            request["tools"],
+            json!([{"type":"web_search","search_context_size":"low"}])
+        );
+        assert!(request.get("thinking_effort").is_none());
+        assert!(request.get("web_search").is_none());
+        assert!(request.get("messages").is_none());
+        let events = [
+            json!({"type":"response.created","sequence_number":1,"response":{"id":"resp_fixture","object":"response","created_at":1737368310,"status":"in_progress","model":"gpt-6-luna","output":[]}}),
+            json!({"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_fixture","output_index":0,"content_index":0,"delta":"Native Responses reply."}),
+            json!({"type":"response.completed","sequence_number":3,"response":{"id":"resp_fixture","object":"response","created_at":1737368310,"status":"completed","model":"gpt-6-luna","output":[],"usage":{"input_tokens":10,"output_tokens":4,"total_tokens":14}}}),
+        ];
+        let body = events
+            .iter()
+            .map(|event| format!("data: {event}\n\n"))
+            .collect::<String>();
+        write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+    });
+    let client = ApiClient::with_timeout_and_tls(
+        host,
+        AuthMethod::BearerToken("synthetic-openai-key".into()),
+        Duration::from_secs(5),
+        None,
+    )
+    .unwrap();
+    let (mut config, request, flow, mut events) = fixture();
+    config.provider = SigAgentProvider::Chatgpt;
+    config.model = "gpt-6-luna".into();
+    config.base_url = None;
+    config.target_node_id = None;
+    tokio::time::timeout(
+        Duration::from_secs(8),
+        answer_with_components(
+            &config,
+            request,
+            flow.clone(),
+            CancellationToken::new(),
+            openai_provider(client),
+            None,
+        ),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    server.join().unwrap();
+    let mut visible = String::new();
+    while let Ok(event) = events.try_recv() {
+        if let SigAgentEvent::Text { text } = event {
+            visible.push_str(&text);
+        }
+    }
+    assert_eq!(visible, "Native Responses reply.");
+    assert_eq!(flow.counts.lock().unwrap().turns, 1);
+}
+
+#[tokio::test]
 async fn upstream_empty_retry_never_reaches_the_provider_again() {
     let (config, request, flow, _) = fixture();
     let provider = ScriptProvider::new(vec![

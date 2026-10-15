@@ -24,7 +24,7 @@ use goose_provider_types::errors::ProviderError;
 use goose_provider_types::model::ModelConfig;
 use goose_providers::api_client::{ApiClient, AuthMethod};
 use goose_providers::declarative::EnvKeyResolver;
-use goose_providers::openai::{OpenAiProviderBuilder, OPEN_AI_VERSIONLESS_BASE_PATH};
+use goose_providers::openai::OpenAiProviderBuilder;
 use rmcp::model::{CallToolRequestParams, CallToolResult, ErrorData, Tool};
 use serde_json::json;
 use tokio::sync::mpsc;
@@ -496,14 +496,19 @@ fn provider(config: &SigAgentConfig) -> Result<Arc<dyn Provider>, Failure> {
             None,
         )
         .map_err(|_| Failure::internal())?;
-        Ok(Arc::new(
-            OpenAiProviderBuilder::new(client)
-                .base_path(OPEN_AI_VERSIONLESS_BASE_PATH)
-                .native_openai(true)
-                .preserve_thinking_context(false)
-                .build(),
-        ))
+        Ok(openai_provider(client))
     }
+}
+
+fn openai_provider(client: ApiClient) -> Arc<dyn Provider> {
+    // Keep Goose's standard /v1 path. A versionless chat path denotes a custom
+    // gateway and disables native Responses routing, including web search.
+    Arc::new(
+        OpenAiProviderBuilder::new(client)
+            .native_openai(true)
+            .preserve_thinking_context(false)
+            .build(),
+    )
 }
 
 fn model(config: &SigAgentConfig, max_tokens: i32) -> ModelConfig {

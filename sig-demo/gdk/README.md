@@ -83,6 +83,11 @@ The native agent only calls its loopback inference endpoint. The approved
 private demo keys remain in the packaged runtime configuration; mesh requests
 do not receive an OpenAI key, and the Brave key is sent only to Brave.
 
+ChatGPT uses Goose's standard native OpenAI provider configuration against
+`https://api.openai.com/v1/responses`. Keep the provider's default versioned
+base path: a custom versionless chat-completions path disables its native
+Responses routing and produces an invalid URL on the official OpenAI host.
+
 ## Error diagnostics
 
 Native errors retain a stable category, an HTTP status when the upstream GDK
