@@ -43,12 +43,43 @@ An `x-mesh-target` header pins inference to that node. A missing node produces a
 error; Sig can discover another for the next request. There is no automatic
 fallback to ChatGPT.
 
+## Model and node selection
+
+General settings shows a model/node selector for either mesh provider. Automatic
+retains randomized free discovery and uses the configured default paid target.
+An explicit selection pins both the model and full node identity. Free and paid
+selections are saved independently. Free warmup honors an explicit pin and does
+not try another node; paid selection never submits synthetic inference.
+
+The selector reads `/v1/models` advertisements and optional `/api/status` peer
+metadata. Models, full node identities, advertised prices, capabilities, context
+limits, last-seen information, and available host/hardware/version/latency details
+are displayed without exposing private invitations. Short peer IDs are matched
+to full identities only when their prefixes are unambiguous. Availability means
+currently advertised, not a paid inference health check. Refresh never submits
+an inference request or creates a Lightning invoice.
+
+Private builds can bundle several targets as
+`{defaultNodeId, nodes: [{id, inviteToken, model, expectedNodeId, label?, hosting?, hardware?}]}`.
+`defaultNodeId` is a full configured mesh key. Legacy single-target configurations
+remain supported. Each configured multi-target entry has a strict node pin.
+The current private build includes the original paid provider and a Phala H200
+provider. Its Phala/TDX description is operator-configured metadata; this client
+does not verify CPU/GPU TEE attestation. A displayed mesh release signature refers
+only to upstream binary provenance.
+
+Selection changes drain old native inference before changing the route. A paid
+target already advertised in the joined mesh reuses that membership; otherwise,
+the client joins that configured target's invite. Repeated join flags race mesh
+bootstraps and are not treated as a way to combine unrelated meshes. Wallet state
+and reusable Goose chat sessions survive these route changes.
+
 ## Paid inference and Wallet
 
-The saved **mesh-llm (paid)** option joins only the private configured invitation
-and selects a paid remote offer for exactly `Qwen3.6-27B-Q6_K`. It connects without
-a synthetic completion. Both mesh modes use the existing GDK bridge and local
-Brave tool; the app leaves payment negotiation and settlement to mesh-llm.
+The saved **mesh-llm (paid)** option joins only a configured private invitation
+and selects the default or explicitly chosen paid model/node pair. It connects
+without a synthetic completion. Both mesh modes use the native Goose state
+machine and local Brave tool; the app leaves payment negotiation and settlement to mesh-llm.
 An invocation's answer and tool-continuation completions all count toward its
 automatic **₿500 daily budget**, including payment fees. Selecting free mesh or
 ChatGPT restores `free_only` policy. Previously submitted payments can settle.
@@ -73,6 +104,11 @@ ignored `.sig-demo/mesh-paid.json` in development, with `inviteToken` and `model
 fields. It never goes through logged node-config, renderer IPC, command arguments,
 public bootstrap caches, or source. Provider changes are serialized; generation
 checks and cancellation prevent stale free warmups from reaching the paid mesh.
+An optional `expectedNodeId` field pins paid inference to one 64-character hex
+mesh node public key. When configured, other paid offers are excluded, even for
+the same model, and an unavailable pinned node produces an error. Existing
+configurations without this field retain their private-mesh selection behavior.
+This pins the operator's mesh identity; it does not verify CPU or GPU attestation.
 
 The selected operator processes the current question and up to 12 recent text
 messages from the same chat, under a 6,000-byte history budget. Attachments,
@@ -84,5 +120,5 @@ made only after executing a requested tool. Ordinary answers use one inference
 request, and a search plus answer generally uses two. Mesh charges input/output
 invoices per request. Native schemas remain available on continuation turns;
 standalone text-form search calls have a narrow validated compatibility parser.
-Only the local Rust helper calls Brave; the chosen mesh node receives
+Only the embedded native Rust tool calls Brave; the chosen mesh node receives
 bounded public search excerpts and source links for the final answer.

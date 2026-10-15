@@ -538,6 +538,11 @@ export default {
     shouldShowUpdateDialog: false,
     themeSetting: 'system',
     sigDemoInferenceProvider: 'mesh-llm',
+    sigDemoMeshCatalog: { options: [] },
+    sigDemoMeshSelectionId: undefined,
+    sigDemoMeshLoading: false,
+    sigDemoMeshSaving: false,
+    sigDemoMeshError: undefined,
     theme: ThemeType.light,
     universalExpireTimer: DurationInSeconds.HOUR,
     unreadCountBadgeType: 'unread-messages',
@@ -662,6 +667,8 @@ export default {
     onSigDemoInferenceProviderChange: action(
       'onSigDemoInferenceProviderChange'
     ),
+    onSigDemoMeshSelectionChange: action('onSigDemoMeshSelectionChange'),
+    onSigDemoMeshRefresh: action('onSigDemoMeshRefresh'),
     onToggleNavTabsCollapse: action('onToggleNavTabsCollapse'),
     onTypingIndicatorsChange: action('onTypingIndicatorsChange'),
     onUniversalExpireTimerChange: action('onUniversalExpireTimerChange'),

@@ -11,6 +11,7 @@ import { setImmediate } from 'node:timers';
 const PAID_MODEL = 'Qwen3.6-27B-Q6_K';
 const firstNode = 'a'.repeat(64);
 const paidNode = 'b'.repeat(64);
+const otherPaidNode = 'c'.repeat(64);
 const token = Buffer.from(JSON.stringify({ id: paidNode, addrs: [] })).toString(
   'base64url'
 );
@@ -23,6 +24,8 @@ const state = {
   installed: true,
   installationFails: false,
   healthGate: undefined,
+  paidConfig: { inviteToken: token, model: PAID_MODEL },
+  catalog: undefined,
 };
 globalThis.__sigMeshPaidTest = state;
 const originalKill = process.kill;
@@ -60,6 +63,7 @@ const stubs = new Map([
     'export const strictAssert = (value, message) => { if (!value) throw new Error(message) }',
   ],
   ['drop.std.ts', 'export const drop = promise => { promise.catch(() => {}) }'],
+  ['node:crypto', 'export const randomInt = () => 0'],
   ['node:fs', 'export const existsSync = () => true'],
   [
     'node:fs/promises',
@@ -67,7 +71,7 @@ const stubs = new Map([
      export const rm = async () => {};
      export const writeFile = async (path, contents) => { globalThis.__sigMeshPaidTest.writes.push({path,contents}) };
      export const readFile = async path => {
-       if (path.endsWith('mesh-paid.json')) return ${JSON.stringify(JSON.stringify({ inviteToken: token, model: PAID_MODEL }))};
+       if (path.endsWith('mesh-paid.json')) return JSON.stringify(globalThis.__sigMeshPaidTest.paidConfig);
        if (path.endsWith('plugin-install.json') && globalThis.__sigMeshPaidTest.installed) return JSON.stringify({name:'lexe-wallet',enabled:true,install_path:'/__sig_demo_test__/mesh/plugins/lexe-wallet'});
        throw new Error('Mock file missing');
      };`,
@@ -115,6 +119,8 @@ const hooks = registerHooks({
 });
 const { SigDemoMesh } = await import('../app/SigDemoMesh.main.ts');
 hooks.deregister();
+const { getSigDemoMeshOptionId } =
+  await import('../ts/util/sigDemoMeshCatalog.std.ts');
 
 const catalog = {
   data: [
@@ -156,7 +162,7 @@ globalThis.fetch = async (url, options) => {
     return { ok: true, json: async () => ({}) };
   }
   if (url.endsWith('/models')) {
-    return { ok: true, json: async () => catalog };
+    return { ok: true, json: async () => state.catalog };
   }
   if (url.endsWith('/api/discover')) {
     return { ok: true, json: async () => [] };
@@ -211,6 +217,8 @@ function reset() {
   state.installed = true;
   state.installationFails = false;
   state.healthGate = undefined;
+  state.paidConfig = { inviteToken: token, model: PAID_MODEL };
+  state.catalog = globalThis.structuredClone(catalog);
 }
 
 try {
@@ -247,6 +255,218 @@ try {
     assert.equal((await mesh.getInference('mesh-llm-paid')).model, PAID_MODEL);
     assert.equal(state.launches.length, 1);
     mesh.stop();
+  });
+
+  await test('a paid node pin excludes other nodes offering the same paid model', async () => {
+    reset();
+    state.paidConfig.expectedNodeId = paidNode.toUpperCase();
+    state.catalog.data[1].payment.offers.unshift({
+      provider_id: otherPaidNode,
+      paid: true,
+      local: false,
+    });
+    const mesh = new SigDemoMesh();
+    const route = await mesh.getInference('mesh-llm-paid');
+    assert.equal(route.model, PAID_MODEL);
+    assert.equal(route.targetNodeId, paidNode);
+    // A paid-only pin must not restrict the existing free selection flow.
+    assert.equal((await mesh.getInference()).targetNodeId, firstNode);
+    mesh.stop();
+  });
+
+  await test('an absent pinned paid node fails without selecting another matching offer', async () => {
+    reset();
+    state.paidConfig.expectedNodeId = paidNode;
+    state.catalog.data[1].payment.offers = [
+      { provider_id: otherPaidNode, paid: true, local: false },
+    ];
+    const mesh = new SigDemoMesh();
+    await mesh.configure('mesh-llm-paid');
+    const originalNow = Date.now;
+    let now = originalNow();
+    // Advance only the route polling deadline; no real 30-second wait is needed.
+    Date.now = () => {
+      now += 10_000;
+      return now;
+    };
+    try {
+      await assert.rejects(
+        mesh.getInference('mesh-llm-paid'),
+        /The paid mesh model is unavailable/
+      );
+      assert.equal(state.launches.length, 1);
+      assert.ok(!state.launches[0].args.includes('--auto'));
+    } finally {
+      Date.now = originalNow;
+      mesh.stop();
+    }
+  });
+
+  await test('a malformed paid node pin rejects configuration before launching a client', async () => {
+    for (const expectedNodeId of ['', 'b'.repeat(63), 'g'.repeat(64), null]) {
+      reset();
+      state.paidConfig.expectedNodeId = expectedNodeId;
+      const mesh = new SigDemoMesh();
+      // oxlint-disable-next-line no-await-in-loop -- Each isolated configuration must finish before resetting its mock state.
+      await assert.rejects(
+        mesh.configure('mesh-llm-paid'),
+        /The private paid mesh is not configured/
+      );
+      assert.equal(state.launches.length, 0);
+      mesh.stop();
+    }
+  });
+
+  await test('explicit free model/node selection persists and catalog refresh never warms or changes policy', async () => {
+    reset();
+    const secondFree = 'd'.repeat(64);
+    state.catalog.data[0].payment.offers.push({
+      provider_id: secondFree,
+      paid: false,
+      local: false,
+    });
+    const mesh = new SigDemoMesh();
+    const choice = getSigDemoMeshOptionId('free-model', secondFree);
+    assert.equal(
+      (await mesh.getInference('mesh-llm', choice)).targetNodeId,
+      secondFree
+    );
+    assert.equal((await mesh.getInference()).targetNodeId, secondFree);
+    const policies = state.requests.length;
+    const launches = state.launches.length;
+    const listed = await mesh.getInferenceOptions('mesh-llm');
+    assert.equal(listed.selectionId, choice);
+    assert.equal(listed.activeId, choice);
+    assert.equal(listed.options.length, 3);
+    assert.ok(listed.options.every(option => !option.paid));
+    assert.equal(state.requests.length, policies);
+    assert.equal(state.launches.length, launches);
+    let warmups = 0;
+    await assert.rejects(
+      mesh.prepareInference(async route => {
+        warmups += 1;
+        assert.equal(route.targetNodeId, secondFree);
+        throw new Error('Synthetic unavailable chosen node');
+      }, choice),
+      /No responsive mesh node/
+    );
+    assert.equal(warmups, 1);
+    assert.equal(
+      (await mesh.getInference('mesh-llm', '')).targetNodeId,
+      firstNode
+    );
+    mesh.stop();
+  });
+
+  await test('multiple configured paid nodes default to their pin and a live explicit peer reuses the joined mesh', async () => {
+    reset();
+    const otherToken = Buffer.from(
+      JSON.stringify({ id: otherPaidNode, addrs: [] })
+    ).toString('base64url');
+    state.paidConfig = {
+      defaultNodeId: otherPaidNode,
+      nodes: [
+        {
+          id: 'legacy',
+          inviteToken: token,
+          model: PAID_MODEL,
+          expectedNodeId: paidNode,
+          label: 'Legacy',
+        },
+        {
+          id: 'phala',
+          inviteToken: otherToken,
+          model: PAID_MODEL,
+          expectedNodeId: otherPaidNode,
+          label: 'Phala GPU',
+          hosting: 'phala',
+          hardware: 'H200',
+        },
+      ],
+    };
+    state.catalog.data[1].payment.offers.push({
+      provider_id: otherPaidNode,
+      paid: true,
+      local: false,
+    });
+    const mesh = new SigDemoMesh();
+    await mesh.configure('mesh-llm-paid', '');
+    assert.equal(
+      (await mesh.getInferenceOptions('mesh-llm-paid')).activeId,
+      getSigDemoMeshOptionId(PAID_MODEL, otherPaidNode)
+    );
+    assert.equal(
+      (await mesh.getInference('mesh-llm-paid')).targetNodeId,
+      otherPaidNode
+    );
+    const listed = await mesh.getInferenceOptions('mesh-llm-paid');
+    assert.equal(
+      listed.options.find(option => option.nodeId === otherPaidNode).hosting,
+      'phala'
+    );
+    assert.ok(!JSON.stringify(listed).includes(token));
+    assert.ok(!JSON.stringify(listed).includes(otherToken));
+    const choice = getSigDemoMeshOptionId(PAID_MODEL, paidNode);
+    assert.equal(
+      (await mesh.getInference('mesh-llm-paid', choice)).targetNodeId,
+      paidNode
+    );
+    assert.equal(state.launches.length, 1);
+    assert.equal(
+      (await mesh.getInference('mesh-llm-paid', '')).targetNodeId,
+      otherPaidNode
+    );
+    assert.equal(state.launches.length, 1);
+    // When a configured target belongs to another membership, switch only the
+    // owned client to its one invitation. Never race unrelated paid invites.
+    state.catalog.data[1].payment.offers =
+      state.catalog.data[1].payment.offers.filter(
+        offer => offer.provider_id !== paidNode
+      );
+    await mesh.configure('mesh-llm-paid', choice);
+    assert.equal(state.launches.length, 2);
+    assert.equal(
+      state.launches.at(-1).args.filter(arg => arg === '--join-file').length,
+      1
+    );
+    assert.equal(
+      state.writes
+        .filter(write => write.path.endsWith('paid-invite.token'))
+        .at(-1).contents,
+      token
+    );
+    assert.ok(state.launches.every(launch => !launch.args.includes('--auto')));
+    mesh.stop();
+  });
+
+  await test('an unavailable explicit paid target does not fall back and remains visible for retry', async () => {
+    reset();
+    state.paidConfig.expectedNodeId = paidNode;
+    const mesh = new SigDemoMesh();
+    const choice = getSigDemoMeshOptionId(PAID_MODEL, otherPaidNode);
+    await mesh.configure('mesh-llm-paid', choice);
+    const originalNow = Date.now;
+    let now = originalNow();
+    Date.now = () => {
+      now += 10_000;
+      return now;
+    };
+    try {
+      await assert.rejects(
+        mesh.getInference('mesh-llm-paid'),
+        /paid mesh model is unavailable/
+      );
+      const listed = await mesh.getInferenceOptions('mesh-llm-paid');
+      assert.equal(listed.selectionId, choice);
+      assert.equal(
+        listed.options.find(option => option.id === choice).available,
+        false
+      );
+      assert.equal(listed.activeId, undefined);
+    } finally {
+      Date.now = originalNow;
+      mesh.stop();
+    }
   });
 
   await test('free mode excludes paid offers and switching resets spending policy', async () => {

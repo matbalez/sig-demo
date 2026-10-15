@@ -58,9 +58,10 @@ const stubs = new Map([
     'SigDemoMesh.main.ts',
     `export class SigDemoMesh {
       constructor() { globalThis.${harnessKey}.mesh = this; }
-      configure(provider) { return globalThis.${harnessKey}.configure(provider); }
-      getInference(provider) { return globalThis.${harnessKey}.getInference(provider); }
-      prepareInference(warm) { return globalThis.${harnessKey}.prepareInference(warm); }
+      configure(provider, selectionId) { return globalThis.${harnessKey}.configure(provider, selectionId); }
+      getInference(provider, selectionId) { return globalThis.${harnessKey}.getInference(provider, selectionId); }
+      prepareInference(warm, selectionId) { return globalThis.${harnessKey}.prepareInference(warm, selectionId); }
+      getInferenceOptions(provider) { return globalThis.${harnessKey}.getInferenceOptions(provider); }
       getWalletSnapshot() { return globalThis.${harnessKey}.getWalletSnapshot(); }
       fundWallet(amount) { return globalThis.${harnessKey}.fundWallet(amount); }
       stop() { globalThis.${harnessKey}.record('mesh-stop'); }
@@ -107,6 +108,7 @@ function createHarness() {
   const reads = [];
   const calls = [];
   const fundCalls = [];
+  const routeSelections = [];
   const events = [];
   const logs = [];
   const mainFrame = {};
@@ -130,6 +132,7 @@ function createHarness() {
     reads,
     calls,
     fundCalls,
+    routeSelections,
     events,
     logs,
     log: (...args) => logs.push(args),
@@ -158,17 +161,38 @@ function createHarness() {
       }
       assert.fail(`Unexpected credential or runtime read: ${path}`);
     },
-    async configure(provider) {
+    async configure(provider, selectionId) {
+      routeSelections.push({ operation: 'configure', provider, selectionId });
       records.push(['configure', provider]);
       await harness.configureImpl(provider);
     },
-    async getInference(provider) {
+    async getInference(provider, selectionId) {
+      routeSelections.push({ operation: 'inference', provider, selectionId });
       records.push(['get-inference', provider]);
       return harness.inferenceImpl(provider);
     },
-    async prepareInference(warm) {
+    async prepareInference(warm, selectionId) {
+      routeSelections.push({
+        operation: 'prepare',
+        provider: 'mesh-llm',
+        selectionId,
+      });
       records.push(['prepare-inference']);
       return harness.prepareImpl(warm);
+    },
+    async getInferenceOptions(provider) {
+      records.push(['catalog', provider]);
+      return {
+        options: [
+          {
+            id: 'synthetic-node-option',
+            model: paidRoute.model,
+            nodeId: paidRoute.targetNodeId,
+            paid: provider === 'mesh-llm-paid',
+            available: true,
+          },
+        ],
+      };
     },
     async getWalletSnapshot() {
       records.push(['wallet-snapshot']);
@@ -624,6 +648,157 @@ try {
       assert.equal((await stale).ok, false);
       assert.equal(harness.calls.length, 0);
       assert.equal(harness.events.length, 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('changing the paid node drains native work before configuring a new exact selection', async () => {
+    const harness = createHarness();
+    const selectionId = JSON.stringify(['Qwen3.6-27B-Q6_K', 'c'.repeat(64)]);
+    try {
+      harness.runtimeReply = false;
+      await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
+      assert.equal(
+        (
+          await harness.invoke(
+            'sig-demo-agent:start',
+            question('mesh-llm-paid')
+          )
+        ).ok,
+        true
+      );
+      harness.abortGate = Promise.withResolvers();
+      const change = harness.invoke('sig-demo-agent:configure', {
+        provider: 'mesh-llm-paid',
+        selectionId,
+      });
+      await tick();
+      assert.equal(harness.calls[0].aborted, true);
+      assert.equal(
+        harness.routeSelections.some(
+          value =>
+            value.operation === 'configure' && value.selectionId === selectionId
+        ),
+        false
+      );
+      const catalog = harness.invoke('sig-demo-mesh:catalog', {
+        provider: 'mesh-llm-paid',
+      });
+      await tick();
+      assert.equal(
+        harness.records.some(([name]) => name === 'catalog'),
+        false
+      );
+      harness.abortGate.resolve();
+      assert.equal((await change).ok, true);
+      assert.equal((await catalog).ok, true);
+      assert.equal(harness.calls.length, 1);
+      assert.equal(
+        (
+          await harness.invoke('sig-demo-agent:start', {
+            ...question('mesh-llm-paid'),
+            requestId: '00000000-0000-4000-8000-000000000002',
+            meshSelectionId: selectionId,
+          })
+        ).ok,
+        true
+      );
+      assert.equal(
+        harness.routeSelections.some(
+          value =>
+            value.operation === 'inference' && value.selectionId === selectionId
+        ),
+        true
+      );
+      assert.equal(
+        harness.records.some(([name]) => name === 'sessions-disposed'),
+        false
+      );
+    } finally {
+      harness.abortGate?.resolve();
+      harness.cleanup();
+      await tick();
+    }
+  });
+
+  await test('paid catalog refresh is metadata only and rejects inactive providers or foreign senders', async () => {
+    const harness = createHarness();
+    try {
+      await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
+      const result = await harness.invoke('sig-demo-mesh:catalog', {
+        provider: 'mesh-llm-paid',
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.value.options[0].nodeId, paidRoute.targetNodeId);
+      assert.equal(harness.calls.length, 0);
+      assert.equal(harness.fundCalls.length, 0);
+      assert.equal(
+        harness.records.some(([name]) => name === 'prepare-inference'),
+        false
+      );
+      const catalogs = harness.records.filter(
+        ([name]) => name === 'catalog'
+      ).length;
+      assert.equal(
+        (
+          await harness.invoke('sig-demo-mesh:catalog', {
+            provider: 'mesh-llm',
+          })
+        ).ok,
+        false
+      );
+      assert.equal(
+        (
+          await harness.invoke(
+            'sig-demo-mesh:catalog',
+            { provider: 'mesh-llm-paid' },
+            { sender: {}, senderFrame: {} }
+          )
+        ).ok,
+        false
+      );
+      assert.equal(
+        harness.records.filter(([name]) => name === 'catalog').length,
+        catalogs
+      );
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('requests from an old node selection cannot start after the picker changes', async () => {
+    const harness = createHarness();
+    try {
+      const selectionId = JSON.stringify([
+        paidRoute.model,
+        paidRoute.targetNodeId,
+      ]);
+      await harness.invoke('sig-demo-agent:configure', {
+        provider: 'mesh-llm-paid',
+        selectionId,
+      });
+      assert.equal(
+        (
+          await harness.invoke(
+            'sig-demo-agent:start',
+            question('mesh-llm-paid')
+          )
+        ).ok,
+        false
+      );
+      assert.equal(harness.calls.length, 0);
+      assert.equal(
+        (
+          await harness.invoke('sig-demo-agent:start', {
+            ...question('mesh-llm-paid'),
+            meshSelectionId: selectionId,
+          })
+        ).ok,
+        true
+      );
+      await tick();
+      assert.equal(harness.calls.length, 1);
     } finally {
       harness.cleanup();
     }

@@ -12157,6 +12157,174 @@
     "messageformat": "Choose what powers Sig on this Mac. Paid mesh inference uses your Wallet with a daily budget of ₿500. Your @sig question and up to 12 recent text messages from that chat are shared with the selected provider. Mesh web search queries are sent to Brave; ChatGPT uses OpenAI web search.",
     "description": "Description of the per-device inference setting for Sig"
   },
+  "icu:SigDemoMesh--selection": {
+    "messageformat": "Model and node",
+    "description": "Mesh inference settings: selected model and node"
+  },
+  "icu:SigDemoMesh--automatic": {
+    "messageformat": "Automatic",
+    "description": "Mesh inference settings: automatic node selection"
+  },
+  "icu:SigDemoMesh--automatic-description": {
+    "messageformat": "Choose an available model and node automatically.",
+    "description": "Mesh inference settings: automatic selection description"
+  },
+  "icu:SigDemoMesh--saved-unavailable": {
+    "messageformat": "Saved selection (unavailable)",
+    "description": "Mesh inference settings: selected node absent from discovery"
+  },
+  "icu:SigDemoMesh--network-nodes": {
+    "messageformat": "Advertised models and nodes",
+    "description": "Mesh inference settings: discovery status"
+  },
+  "icu:SigDemoMesh--loading": {
+    "messageformat": "Finding models and nodes…",
+    "description": "Mesh inference settings: loading discovery metadata"
+  },
+  "icu:SigDemoMesh--saving": {
+    "messageformat": "Updating selection…",
+    "description": "Mesh inference settings: applying a node selection"
+  },
+  "icu:SigDemoMesh--available-count": {
+    "messageformat": "{count, plural, one {# model and node option advertised} other {# model and node options advertised}}",
+    "description": "Mesh inference settings: available model-node pair count"
+  },
+  "icu:SigDemoMesh--refresh": {
+    "messageformat": "Refresh",
+    "description": "Mesh inference settings: refresh discovery"
+  },
+  "icu:SigDemoMesh--load-error": {
+    "messageformat": "Could not update the node list. Try refreshing.",
+    "description": "Mesh inference settings: discovery failure"
+  },
+  "icu:SigDemoMesh--selection-error": {
+    "messageformat": "Could not prepare this selection. Refresh or choose Automatic.",
+    "description": "Mesh inference settings: selection failed"
+  },
+  "icu:SigDemoMesh--unavailable-description": {
+    "messageformat": "The saved model or node is not currently advertised. Refresh or choose Automatic.",
+    "description": "Mesh inference settings: unavailable saved node"
+  },
+  "icu:SigDemoMesh--selected-details": {
+    "messageformat": "Selected model and node",
+    "description": "Mesh inference settings: selected option details"
+  },
+  "icu:SigDemoMesh--active-details": {
+    "messageformat": "Current automatic selection",
+    "description": "Mesh inference settings: automatically selected option details"
+  },
+  "icu:SigDemoMesh--model": {
+    "messageformat": "Model",
+    "description": "Mesh inference metadata: model name"
+  },
+  "icu:SigDemoMesh--node": {
+    "messageformat": "Node",
+    "description": "Mesh inference metadata: node label and identity"
+  },
+  "icu:SigDemoMesh--cost": {
+    "messageformat": "Inference",
+    "description": "Mesh inference metadata: free or paid"
+  },
+  "icu:SigDemoMesh--free": {
+    "messageformat": "Free",
+    "description": "Mesh inference metadata: free node"
+  },
+  "icu:SigDemoMesh--paid": {
+    "messageformat": "Paid",
+    "description": "Mesh inference metadata: paid node"
+  },
+  "icu:SigDemoMesh--input-price": {
+    "messageformat": "Input price per 1M tokens",
+    "description": "Mesh inference metadata: price per million input tokens"
+  },
+  "icu:SigDemoMesh--output-price": {
+    "messageformat": "Output price per 1M tokens",
+    "description": "Mesh inference metadata: price per million output tokens"
+  },
+  "icu:SigDemoMesh--minimum-payment": {
+    "messageformat": "Minimum payment",
+    "description": "Mesh inference metadata: minimum invoice amount"
+  },
+  "icu:SigDemoMesh--approximate-amount": {
+    "messageformat": "Approximately {amount}",
+    "description": "Mesh inference metadata: amount rounded up to a whole bitcoin base unit"
+  },
+  "icu:SigDemoMesh--price-unavailable": {
+    "messageformat": "Price unavailable",
+    "description": "Mesh inference option: paid price is not advertised"
+  },
+  "icu:SigDemoMesh--option-pricing": {
+    "messageformat": "Input {inputPrice} / Output {outputPrice} per 1M tokens",
+    "description": "Mesh inference dropdown option: advertised prices per million input and output tokens"
+  },
+  "icu:SigDemoMesh--context": {
+    "messageformat": "Model context capacity",
+    "description": "Mesh inference metadata: model context window size"
+  },
+  "icu:SigDemoMesh--context-tokens": {
+    "messageformat": "{tokens} tokens",
+    "description": "Mesh inference metadata: context window token count"
+  },
+  "icu:SigDemoMesh--hardware": {
+    "messageformat": "Hardware",
+    "description": "Mesh inference metadata: advertised hardware"
+  },
+  "icu:SigDemoMesh--hosting": {
+    "messageformat": "Hosting",
+    "description": "Mesh inference metadata: hosting environment"
+  },
+  "icu:SigDemoMesh--phala-hosting": {
+    "messageformat": "Phala (operator configured)",
+    "description": "Mesh inference metadata: operator-configured Phala hosting, not client-verified attestation"
+  },
+  "icu:SigDemoMesh--capabilities": {
+    "messageformat": "Capabilities",
+    "description": "Mesh inference metadata: advertised capabilities"
+  },
+  "icu:SigDemoMesh--last-seen": {
+    "messageformat": "Last seen",
+    "description": "Mesh inference metadata: discovery age"
+  },
+  "icu:SigDemoMesh--just-now": {
+    "messageformat": "Just now",
+    "description": "Mesh inference metadata: recently discovered node"
+  },
+  "icu:SigDemoMesh--seconds-ago": {
+    "messageformat": "{seconds, plural, one {# second ago} other {# seconds ago}}",
+    "description": "Mesh inference metadata: seconds since discovery"
+  },
+  "icu:SigDemoMesh--metadata-description": {
+    "messageformat": "Hardware and hosting details are supplied by the node operator; attestation is not verified by this app.",
+    "description": "Mesh inference settings: clarify the source of hardware and hosting metadata"
+  },
+  "icu:SigDemoMesh--hostname": {
+    "messageformat": "Hostname",
+    "description": "Mesh inference metadata: advertised hostname"
+  },
+  "icu:SigDemoMesh--version": {
+    "messageformat": "mesh-llm version",
+    "description": "Mesh inference metadata: client version reported for the node"
+  },
+  "icu:SigDemoMesh--latency": {
+    "messageformat": "Latency",
+    "description": "Mesh inference metadata: observed node latency"
+  },
+  "icu:SigDemoMesh--latency-ms": {
+    "messageformat": "{milliseconds} ms",
+    "description": "Mesh inference metadata: latency in milliseconds"
+  },
+  "icu:SigDemoMesh--release-signature": {
+    "messageformat": "Mesh release signature",
+    "description": "Mesh inference metadata: mesh binary build provenance, not TEE attestation"
+  },
+  "icu:SigDemoMesh--verified": {
+    "messageformat": "Verified",
+    "description": "Mesh inference metadata: verified mesh release signature"
+  },
+  "icu:SigDemoMesh--unverified": {
+    "messageformat": "Unverified",
+    "description": "Mesh inference metadata: unverified mesh release signature"
+  },
   "icu:SigDemoWallet--title": {
     "messageformat": "Wallet",
     "description": "Sig demo Lightning Wallet settings: title"

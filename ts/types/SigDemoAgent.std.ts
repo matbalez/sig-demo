@@ -31,6 +31,7 @@ export type SigDemoAgentRunRequestType = Readonly<{
   sourceText: string;
   prompt: string;
   provider: SigDemoInferenceProviderType;
+  meshSelectionId?: string;
   author?: string;
   history?: ReadonlyArray<SigDemoAgentHistoryMessageType>;
 }>;

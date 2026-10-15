@@ -22,7 +22,19 @@ import {
   parseSigDemoMeshBootstrapCache,
   selectSigDemoMeshBootstrapTokens,
 } from '../ts/util/sigDemoMeshBootstrap.node.ts';
+import {
+  getSigDemoMeshOptionId,
+  parseSigDemoMeshCatalog,
+  parseSigDemoMeshOptionId,
+} from '../ts/util/sigDemoMeshCatalog.std.ts';
+import { parseSigDemoPaidMeshConfig } from '../ts/util/sigDemoMeshPaidConfig.std.ts';
+import { enrichSigDemoMeshNodeDetails } from '../ts/util/sigDemoMeshNodeDetails.std.ts';
 import type { SigDemoInferenceProviderType } from '../ts/types/SigDemoAgent.std.ts';
+import type {
+  SigDemoMeshCatalogType,
+  SigDemoMeshOptionType,
+  SigDemoMeshProviderType,
+} from '../ts/types/SigDemoMesh.std.ts';
 import type {
   SigDemoWalletInvoiceType,
   SigDemoWalletSnapshotType,
@@ -35,37 +47,9 @@ const API_PORT = 9337;
 const CONSOLE_PORT = 3131;
 const BASE_URL = `http://127.0.0.1:${API_PORT}/v1`;
 const CONTROL_URL = `http://127.0.0.1:${CONSOLE_PORT}`;
-const PAID_MODEL = 'Qwen3.6-27B-Q6_K';
 type MeshMode = 'free' | 'paid';
-const paidConfigSchema = z.object({
-  inviteToken: z
-    .string()
-    .min(20)
-    .max(16_384)
-    .regex(/^[A-Za-z0-9_-]+={0,2}$/),
-  model: z.literal(PAID_MODEL),
-});
-
-const modelsSchema = z.object({
-  data: z.array(
-    z.object({
-      id: z.string().min(1).max(1024),
-      owned_by: z.string().optional(),
-      capabilities: z.array(z.string()).optional(),
-      payment: z
-        .object({
-          offers: z.array(
-            z.object({
-              provider_id: z.string(),
-              paid: z.boolean(),
-              local: z.boolean(),
-            })
-          ),
-        })
-        .optional(),
-    })
-  ),
-});
+type PaidConfig = ReturnType<typeof parseSigDemoPaidMeshConfig>;
+type PaidNode = PaidConfig['nodes'][number];
 
 export type SigDemoMeshInferenceType = Readonly<{
   baseUrl: string;
@@ -224,6 +208,11 @@ export class SigDemoMesh {
   #requestedProvider: SigDemoInferenceProviderType = 'mesh-llm';
   #configuredProvider: SigDemoInferenceProviderType | undefined;
   #mode: MeshMode | undefined;
+  #expectedPaidNodeId: string | undefined;
+  #paidModel: string | undefined;
+  #paidSource: PaidNode | undefined;
+  #paidConfiguration: PaidConfig | undefined;
+  readonly #selectionIds = new Map<SigDemoInferenceProviderType, string>();
   #configurationPromise: Promise<void> | undefined;
   #configurationTail: Promise<void> = Promise.resolve();
   #walletInstalled = false;
@@ -238,9 +227,22 @@ export class SigDemoMesh {
     () => this.#environment()
   );
 
-  async configure(provider: SigDemoInferenceProviderType): Promise<void> {
+  async configure(
+    provider: SigDemoInferenceProviderType,
+    selectionId?: string
+  ): Promise<void> {
+    const previousSelection = this.#selectionIds.get(provider);
+    const selection =
+      selectionId === undefined ? previousSelection : selectionId || undefined;
+    if (selection && !parseSigDemoMeshOptionId(selection)) {
+      throw new Error('The selected mesh model or node is invalid.');
+    }
+    const selectionChanged = previousSelection !== selection;
+    if (selection) this.#selectionIds.set(provider, selection);
+    else this.#selectionIds.delete(provider);
     if (
       !this.#stopped &&
+      !selectionChanged &&
       provider === this.#requestedProvider &&
       this.#configurationPromise
     ) {
@@ -252,6 +254,7 @@ export class SigDemoMesh {
       this.#child.signalCode == null;
     if (
       !this.#stopped &&
+      !selectionChanged &&
       provider === this.#configuredProvider &&
       provider === this.#requestedProvider &&
       (liveChild || provider === 'chatgpt')
@@ -333,8 +336,62 @@ export class SigDemoMesh {
       this.#child &&
       this.#child.exitCode == null &&
       this.#child.signalCode == null;
+    const selected = parseSigDemoMeshOptionId(
+      this.#selectionIds.get(provider) ?? ''
+    );
+    const defaultPaidNode =
+      paidConfig?.nodes.find(
+        node => node.expectedNodeId === paidConfig.defaultNodeId
+      ) ?? paidConfig?.nodes[0];
+    let paidSource = selected
+      ? (paidConfig?.nodes.find(
+          node =>
+            node.model === selected.model &&
+            node.expectedNodeId === selected.nodeId
+        ) ?? defaultPaidNode)
+      : defaultPaidNode;
+    const wantedPaidRoute =
+      selected ??
+      (defaultPaidNode?.expectedNodeId
+        ? {
+            model: defaultPaidNode.model,
+            nodeId: defaultPaidNode.expectedNodeId,
+          }
+        : undefined);
+    if (
+      mode === 'paid' &&
+      childAlive &&
+      this.#mode === 'paid' &&
+      this.#paidSource &&
+      wantedPaidRoute
+    ) {
+      try {
+        const live = parseSigDemoMeshCatalog(
+          await readJson(`${BASE_URL}/models`),
+          true
+        );
+        this.#assertCurrent(generation);
+        if (
+          live.some(
+            option =>
+              option.model === wantedPaidRoute.model &&
+              option.nodeId === wantedPaidRoute.nodeId
+          )
+        ) {
+          // Several configured peers may already share this membership. Pin the
+          // chosen route without restarting a healthy owned client.
+          paidSource = this.#paidSource;
+        }
+      } catch {
+        this.#assertCurrent(generation);
+      }
+    }
     const restart =
-      !childAlive || this.#mode !== mode || installed !== this.#walletInstalled;
+      !childAlive ||
+      this.#mode !== mode ||
+      installed !== this.#walletInstalled ||
+      (mode === 'paid' &&
+        this.#paidSource?.inviteToken !== paidSource?.inviteToken);
     if (restart) {
       await this.#stopOwnedChild();
       this.#assertCurrent(generation);
@@ -348,6 +405,9 @@ export class SigDemoMesh {
       }
       this.#assertCurrent(generation);
       this.#mode = 'free';
+      this.#expectedPaidNodeId = undefined;
+      this.#paidModel = undefined;
+      this.#paidSource = undefined;
       this.#configuredProvider = provider;
       return;
     }
@@ -355,9 +415,9 @@ export class SigDemoMesh {
       await rm(join(this.#directory, 'invite.token'), { force: true });
       this.#assertCurrent(generation);
       if (mode === 'paid') {
-        strictAssert(paidConfig, 'Missing paid mesh configuration');
+        strictAssert(paidSource, 'Missing paid mesh configuration');
         this.#startedFromCache = false;
-        await this.#launch(mode, [paidConfig.inviteToken], generation);
+        await this.#launch(mode, [paidSource.inviteToken], generation);
       } else {
         let tokens: Array<string> | undefined;
         try {
@@ -396,16 +456,26 @@ export class SigDemoMesh {
       this.#assertCurrent(generation);
     }
     this.#mode = mode;
+    this.#paidConfiguration = paidConfig ?? this.#paidConfiguration;
+    this.#expectedPaidNodeId =
+      mode === 'paid'
+        ? (selected?.nodeId ?? defaultPaidNode?.expectedNodeId)
+        : undefined;
+    this.#paidModel =
+      mode === 'paid' ? (selected?.model ?? defaultPaidNode?.model) : undefined;
+    this.#paidSource = mode === 'paid' ? paidSource : undefined;
     this.#configuredProvider = provider;
     log.info('Bundled mesh client configured', { mode });
   }
 
-  async #paidConfig(): Promise<z.infer<typeof paidConfigSchema>> {
+  async #paidConfig(): Promise<PaidConfig> {
     try {
       const path = app.isPackaged
         ? join(process.resourcesPath, 'sig-demo-mesh/paid.json')
         : join(getAppRootDir(), '.sig-demo/mesh-paid.json');
-      return paidConfigSchema.parse(JSON.parse(await readFile(path, 'utf8')));
+      return parseSigDemoPaidMeshConfig(
+        JSON.parse(await readFile(path, 'utf8'))
+      );
     } catch {
       throw new Error('The private paid mesh is not configured in this build.');
     }
@@ -488,9 +558,10 @@ export class SigDemoMesh {
   }
 
   async getInference(
-    provider: SigDemoInferenceProviderType = 'mesh-llm'
+    provider: SigDemoInferenceProviderType = 'mesh-llm',
+    selectionId?: string
   ): Promise<SigDemoMeshInferenceType> {
-    await this.configure(provider);
+    await this.configure(provider, selectionId);
     const generation = this.#generation;
     this.#assertCurrent(generation);
     if (
@@ -532,14 +603,108 @@ export class SigDemoMesh {
     }
   }
 
+  /** Refresh metadata only: no inference, warmup, provider switch, or payment. */
+  async getInferenceOptions(
+    provider: SigDemoMeshProviderType
+  ): Promise<SigDemoMeshCatalogType> {
+    const paid = provider === 'mesh-llm-paid';
+    const configuration = paid
+      ? (this.#paidConfiguration ?? (await this.#paidConfig()))
+      : undefined;
+    const options = new Map<string, SigDemoMeshOptionType>();
+    let status: unknown;
+    if (
+      provider === this.#requestedProvider &&
+      this.#child &&
+      this.#child.exitCode == null &&
+      this.#child.signalCode == null
+    ) {
+      const [catalogResult, statusResult] = await Promise.allSettled([
+        this.#liveOptions(),
+        readJson(`${CONTROL_URL}/api/status`, 1500),
+      ]);
+      if (catalogResult.status === 'fulfilled') {
+        for (const option of catalogResult.value)
+          options.set(option.id, option);
+      } else {
+        // Offline configured/selected entries remain visible and retryable.
+      }
+      if (statusResult.status === 'fulfilled') status = statusResult.value;
+    }
+    for (const node of configuration?.nodes ?? []) {
+      if (!node.expectedNodeId) continue;
+      const id = getSigDemoMeshOptionId(node.model, node.expectedNodeId);
+      const current = options.get(id);
+      options.set(id, {
+        id,
+        model: node.model,
+        nodeId: node.expectedNodeId,
+        paid: true,
+        available: false,
+        ...current,
+        label: node.label,
+        hosting: node.hosting,
+        hardware: node.hardware,
+      });
+    }
+    const selectionId = this.#selectionIds.get(provider);
+    const selection = selectionId
+      ? parseSigDemoMeshOptionId(selectionId)
+      : undefined;
+    if (selectionId && selection && !options.has(selectionId)) {
+      options.set(selectionId, {
+        id: selectionId,
+        model: selection.model,
+        nodeId: selection.nodeId,
+        paid,
+        available: false,
+      });
+    }
+    let activeId: string | undefined;
+    if (provider === this.#requestedProvider) {
+      if (this.#selected) {
+        activeId = getSigDemoMeshOptionId(
+          this.#selected.model,
+          this.#selected.targetNodeId
+        );
+      } else if (
+        paid &&
+        !selectionId &&
+        this.#paidModel &&
+        this.#expectedPaidNodeId
+      ) {
+        activeId = getSigDemoMeshOptionId(
+          this.#paidModel,
+          this.#expectedPaidNodeId
+        );
+      }
+    }
+    return {
+      options: enrichSigDemoMeshNodeDetails([...options.values()], status).sort(
+        (left, right) =>
+          left.model.localeCompare(right.model) ||
+          left.nodeId.localeCompare(right.nodeId)
+      ),
+      selectionId,
+      activeId,
+    };
+  }
+
   async prepareInference(
-    warm: (route: SigDemoMeshInferenceType) => Promise<void>
+    warm: (route: SigDemoMeshInferenceType) => Promise<void>,
+    selectionId?: string
   ): Promise<SigDemoMeshInferenceType> {
     if (this.#requestedProvider !== 'mesh-llm') {
       throw new Error('Only free mesh inference is warmed.');
     }
+    if (
+      selectionId !== undefined &&
+      (selectionId || undefined) !== this.#selectionIds.get('mesh-llm')
+    ) {
+      await this.configure('mesh-llm', selectionId);
+    }
     if (!this.#preparationPromise) {
-      this.#preparationPromise = this.#prepareInference(warm);
+      this.#preparationPromise = this.#prepareInference(warm, selectionId);
     }
     const preparation = this.#preparationPromise;
     try {
@@ -552,10 +717,11 @@ export class SigDemoMesh {
   }
 
   async #prepareInference(
-    warm: (route: SigDemoMeshInferenceType) => Promise<void>
+    warm: (route: SigDemoMeshInferenceType) => Promise<void>,
+    selectionId?: string
   ): Promise<SigDemoMeshInferenceType> {
     let candidate: SigDemoMeshInferenceType | undefined =
-      await this.getInference();
+      await this.getInference('mesh-llm', selectionId);
     const generation = this.#generation;
     const routeKey = (route: SigDemoMeshInferenceType) =>
       `${route.targetNodeId}\u0000${route.model}`;
@@ -599,6 +765,7 @@ export class SigDemoMesh {
         log.info('Public mesh inference slow or unavailable');
       }
       if (attempt === 0) {
+        if (this.#selectionIds.get('mesh-llm')) break;
         try {
           candidate = this.#selectRoute(
             (await this.#availableRoutes(generation)).filter(
@@ -659,6 +826,9 @@ export class SigDemoMesh {
     tokens: ReadonlyArray<string> | undefined,
     generation: number
   ): Promise<void> {
+    if (mode === 'paid' && !tokens?.length) {
+      throw new Error('The private paid mesh is not configured in this build.');
+    }
     this.#qualifiedRouteKey = undefined;
     this.#assertCurrent(generation);
     await this.#stopOwnedChild();
@@ -758,38 +928,34 @@ export class SigDemoMesh {
     }
   }
 
+  async #liveOptions(
+    generation = this.#generation
+  ): Promise<Array<SigDemoMeshOptionType>> {
+    const options = parseSigDemoMeshCatalog(
+      await readJson(`${BASE_URL}/models`),
+      this.#mode === 'paid'
+    );
+    this.#assertCurrent(generation);
+    return options;
+  }
+
   async #availableRoutes(
     generation = this.#generation
   ): Promise<Array<SigDemoMeshInferenceType>> {
-    const models = modelsSchema.parse(await readJson(`${BASE_URL}/models`));
-    this.#assertCurrent(generation);
-    const routes: Array<SigDemoMeshInferenceType> = [];
-    for (const model of models.data) {
-      if (
-        model.id === 'mesh' ||
-        model.id === 'auto' ||
-        model.id.length > 128 ||
-        /[\u0000-\u001f\u007f]/.test(model.id) ||
-        model.owned_by?.startsWith('plugin:') ||
-        !model.capabilities?.includes('text') ||
-        (this.#mode === 'paid' && model.id !== PAID_MODEL)
-      ) {
-        continue;
-      }
-      for (const offer of model.payment?.offers ?? []) {
-        if (
-          offer.paid === (this.#mode === 'paid') &&
-          !offer.local &&
-          /^[a-fA-F0-9]{64}$/.test(offer.provider_id)
-        ) {
-          routes.push({
-            baseUrl: BASE_URL,
-            model: model.id,
-            targetNodeId: offer.provider_id,
-          });
-        }
-      }
-    }
+    const options = await this.#liveOptions(generation);
+    const routes: Array<SigDemoMeshInferenceType> = options
+      .filter(
+        option =>
+          this.#mode !== 'paid' ||
+          (option.model === this.#paidModel &&
+            (this.#expectedPaidNodeId === undefined ||
+              option.nodeId === this.#expectedPaidNodeId))
+      )
+      .map(option => ({
+        baseUrl: BASE_URL,
+        model: option.model,
+        targetNodeId: option.nodeId,
+      }));
     this.#availableNodeIds = [
       ...new Set(routes.map(route => route.targetNodeId)),
     ];
@@ -828,11 +994,10 @@ export class SigDemoMesh {
         this.#child.signalCode != null
       ) {
         this.#startedFromCache = false;
-        const paidConfig =
-          this.#mode === 'paid' ? await this.#paidConfig() : undefined;
+        const paidSource = this.#mode === 'paid' ? this.#paidSource : undefined;
         await this.#launch(
           this.#mode ?? 'free',
-          paidConfig ? [paidConfig.inviteToken] : undefined,
+          paidSource ? [paidSource.inviteToken] : undefined,
           generation
         );
         if (this.#walletInstalled) {
@@ -878,12 +1043,26 @@ export class SigDemoMesh {
     if (this.#stopped || !routes.length) {
       return undefined;
     }
-    const nodes = [...new Set(routes.map(route => route.targetNodeId))];
-    const selectedNode = nodes[randomInt(nodes.length)];
-    const nodeRoutes = routes.filter(
-      route => route.targetNodeId === selectedNode
-    );
-    const selected = nodeRoutes[randomInt(nodeRoutes.length)];
+    const selectionId = this.#selectionIds.get(this.#requestedProvider);
+    const selection = selectionId
+      ? parseSigDemoMeshOptionId(selectionId)
+      : undefined;
+    let selected: SigDemoMeshInferenceType | undefined;
+    if (selection) {
+      selected = routes.find(
+        route =>
+          route.model === selection.model &&
+          route.targetNodeId === selection.nodeId
+      );
+      if (!selected) return undefined;
+    } else {
+      const nodes = [...new Set(routes.map(route => route.targetNodeId))];
+      const selectedNode = nodes[randomInt(nodes.length)];
+      const nodeRoutes = routes.filter(
+        route => route.targetNodeId === selectedNode
+      );
+      selected = nodeRoutes[randomInt(nodeRoutes.length)];
+    }
     strictAssert(selected, 'No available mesh route');
     this.#selected = selected;
     log.info('Connected to an available mesh node', {

@@ -1,7 +1,7 @@
 // Copyright 2024 Signal Messenger, LLC
 // SPDX-License-Identifier: AGPL-3.0-only
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from 'react-redux';
 
 import type { AudioDevice } from '@signalapp/ringrtc';
@@ -81,7 +81,7 @@ import {
 import { getPreferredBadgeSelector } from '../selectors/badges.preload.ts';
 import { SmartProfileEditor } from './ProfileEditor.preload.tsx';
 import { useNavActions } from '../ducks/nav.std.ts';
-import { NavTab } from '../../types/Nav.std.ts';
+import { NavTab, SettingsPage } from '../../types/Nav.std.ts';
 import { renderToastManagerWithoutMegaphone } from './ToastManager.preload.tsx';
 import { useToastActions } from '../ducks/toast.preload.ts';
 import { DataReader, DataWriter } from '../../sql/Client.preload.ts';
@@ -137,7 +137,14 @@ import { useGlobalModalActions } from '../ducks/globalModals.preload.ts';
 import { maybeUpdateRegistrationLock } from '../../util/registrationLock.preload.ts';
 import { disableSignalPin } from '../../util/disableSignalPin.preload.ts';
 import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../../types/SigDemoAgent.std.ts';
-import { configureSigDemoInferenceProvider } from '../../services/sigDemoAgentClient.preload.ts';
+import {
+  configureSigDemoInferenceProvider,
+  getSigDemoMeshCatalog,
+} from '../../services/sigDemoAgentClient.preload.ts';
+import type {
+  SigDemoMeshCatalogType,
+  SigDemoMeshProviderType,
+} from '../../types/SigDemoMesh.std.ts';
 import { SmartPreferencesSigDemoWallet } from './PreferencesSigDemoWallet.preload.tsx';
 
 const RESETTABLE_GLOBAL_NOTIFICATION_ITEMS = [
@@ -703,6 +710,121 @@ export function SmartPreferences(): JSX.Element | null {
       }
     );
 
+  const [freeMeshSelection, setFreeMeshSelection] = createItemsAccess(
+    'sigDemoMeshFreeSelection',
+    ''
+  );
+  const [paidMeshSelection, setPaidMeshSelection] = createItemsAccess(
+    'sigDemoMeshPaidSelection',
+    ''
+  );
+  const sigDemoMeshSelectionId =
+    sigDemoInferenceProvider === 'mesh-llm-paid'
+      ? paidMeshSelection
+      : freeMeshSelection;
+  const [meshRefreshVersion, setMeshRefreshVersion] = useState(0);
+  const [meshCatalogState, setMeshCatalogState] = useState<
+    Readonly<{
+      provider?: SigDemoMeshProviderType;
+      catalog?: SigDemoMeshCatalogType;
+      loading: boolean;
+      error?: 'catalog' | 'selection';
+    }>
+  >({ loading: false });
+  const [meshSavingProvider, setMeshSavingProvider] =
+    useState<SigDemoMeshProviderType>();
+  const selectionVersion = useRef(0);
+  const selectionProvider = useRef(sigDemoInferenceProvider);
+  const isMeshSettingsOpen =
+    window.SignalContext.config.sigDemoEnabled &&
+    currentLocation.tab === NavTab.Settings &&
+    currentLocation.details.page === SettingsPage.General &&
+    sigDemoInferenceProvider !== 'chatgpt';
+
+  useEffect(() => {
+    if (!isMeshSettingsOpen) {
+      return undefined;
+    }
+    const provider = sigDemoInferenceProvider;
+    const catalogRequestVersion = selectionVersion.current;
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      setMeshCatalogState(previous => ({
+        provider,
+        catalog: previous.provider === provider ? previous.catalog : undefined,
+        loading: true,
+      }));
+      const load = async () => {
+        const result = await getSigDemoMeshCatalog(provider);
+        if (!active || catalogRequestVersion !== selectionVersion.current)
+          return;
+        setMeshCatalogState(previous => {
+          let catalog =
+            previous.provider === provider ? previous.catalog : undefined;
+          if (result.ok) catalog = result.value;
+          return {
+            provider,
+            catalog,
+            loading: false,
+            error: result.ok ? undefined : 'catalog',
+          };
+        });
+      };
+      drop(load());
+    });
+    return () => {
+      active = false;
+    };
+    // The counter intentionally reruns discovery when Refresh is requested.
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies
+  }, [isMeshSettingsOpen, sigDemoInferenceProvider, meshRefreshVersion]);
+
+  useEffect(() => {
+    if (selectionProvider.current !== sigDemoInferenceProvider) {
+      selectionProvider.current = sigDemoInferenceProvider;
+      queueMicrotask(() => setMeshSavingProvider(undefined));
+    }
+    return () => {
+      selectionVersion.current += 1;
+    };
+  }, [sigDemoInferenceProvider]);
+
+  const onSigDemoMeshSelectionChange = (selectionId: string): void => {
+    if (sigDemoInferenceProvider === 'chatgpt') return;
+    const provider = sigDemoInferenceProvider;
+    if (provider === 'mesh-llm') setFreeMeshSelection(selectionId);
+    else setPaidMeshSelection(selectionId);
+    selectionVersion.current += 1;
+    const selectionRequestVersion = selectionVersion.current;
+    setMeshSavingProvider(provider);
+    setMeshCatalogState(previous => ({ ...previous, error: undefined }));
+    const update = async () => {
+      const result = await configureSigDemoInferenceProvider(
+        provider,
+        selectionId
+      );
+      if (selectionRequestVersion !== selectionVersion.current) return;
+      setMeshSavingProvider(undefined);
+      if (!result.ok) {
+        setMeshCatalogState(previous => ({
+          provider,
+          catalog:
+            previous.provider === provider ? previous.catalog : undefined,
+          loading: false,
+          error: 'selection',
+        }));
+      } else {
+        setMeshRefreshVersion(previous => previous + 1);
+      }
+    };
+    drop(update());
+  };
+  const onSigDemoMeshRefresh = () =>
+    setMeshRefreshVersion(previous => previous + 1);
+  const meshStateMatchesProvider =
+    meshCatalogState.provider === sigDemoInferenceProvider;
+
   const [hasLinkPreviews, onLinkPreviewsChange] = createItemsAccess(
     'linkPreviews',
     false,
@@ -1209,6 +1331,8 @@ export function SmartPreferences(): JSX.Element | null {
         onTextFormattingChange={onTextFormattingChange}
         onThemeChange={onThemeChange}
         onSigDemoInferenceProviderChange={onSigDemoInferenceProviderChange}
+        onSigDemoMeshSelectionChange={onSigDemoMeshSelectionChange}
+        onSigDemoMeshRefresh={onSigDemoMeshRefresh}
         onToggleNavTabsCollapse={toggleNavTabsCollapse}
         onTypingIndicatorsChange={onTypingIndicatorsChange}
         onUniversalExpireTimerChange={onUniversalExpireTimerChange}
@@ -1264,6 +1388,18 @@ export function SmartPreferences(): JSX.Element | null {
         theme={theme}
         themeSetting={themeSetting}
         sigDemoInferenceProvider={sigDemoInferenceProvider}
+        sigDemoMeshCatalog={
+          meshStateMatchesProvider ? meshCatalogState.catalog : undefined
+        }
+        sigDemoMeshSelectionId={sigDemoMeshSelectionId}
+        sigDemoMeshLoading={
+          isMeshSettingsOpen &&
+          (!meshStateMatchesProvider || meshCatalogState.loading)
+        }
+        sigDemoMeshSaving={meshSavingProvider === sigDemoInferenceProvider}
+        sigDemoMeshError={
+          meshStateMatchesProvider ? meshCatalogState.error : undefined
+        }
         universalExpireTimer={universalExpireTimer}
         unreadCountBadgeType={unreadCountBadgeType}
         validateBackup={validateBackup}

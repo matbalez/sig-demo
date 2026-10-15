@@ -79,6 +79,8 @@ export type BlockedNumber = {
 export type StorageAccessType = {
   sigDemoRegistrationDraft: SigDemoRegistrationDraft;
   sigDemoInferenceProvider: SigDemoInferenceProviderType;
+  sigDemoMeshFreeSelection: string;
+  sigDemoMeshPaidSelection: string;
   'always-relay-calls': boolean;
   'audio-notification': boolean;
   'auto-download-update': boolean;
@@ -382,6 +384,8 @@ export type StorageAccessType = {
 export const STORAGE_KEYS_TO_PRESERVE_AFTER_UNLINK = [
   // UI & user-setting-related keys
   'sigDemoInferenceProvider',
+  'sigDemoMeshFreeSelection',
+  'sigDemoMeshPaidSelection',
   'always-relay-calls',
   'audio-notification',
   'audioMessage',

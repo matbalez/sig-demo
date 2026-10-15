@@ -65,6 +65,8 @@ import type {
 import { getNotifyWhileMutedSummary } from '../util/notifyWhileMuted.std.ts';
 import type { ThemeSettingType } from '../util/theme.std.ts';
 import type { SigDemoInferenceProviderType } from '../types/SigDemoAgent.std.ts';
+import type { SigDemoMeshCatalogType } from '../types/SigDemoMesh.std.ts';
+import { PreferencesSigDemoMeshInference } from './PreferencesSigDemoMeshInference.dom.tsx';
 import type { AnyToast } from '../types/Toast.dom.tsx';
 import { ToastType } from '../types/Toast.dom.tsx';
 import type { ConversationType } from '../state/ducks/conversations.preload.ts';
@@ -200,6 +202,11 @@ export type PropsDataType = {
   sentMediaQualitySetting: SentMediaQualitySettingType;
   themeSetting: ThemeSettingType | undefined;
   sigDemoInferenceProvider: SigDemoInferenceProviderType;
+  sigDemoMeshCatalog?: SigDemoMeshCatalogType;
+  sigDemoMeshSelectionId?: string;
+  sigDemoMeshLoading: boolean;
+  sigDemoMeshSaving: boolean;
+  sigDemoMeshError?: 'catalog' | 'selection';
   universalExpireTimer: DurationInSeconds;
   unreadCountBadgeType: UnreadCountBadgeType;
   whoCanFindMe: PhoneNumberDiscoverability;
@@ -393,6 +400,8 @@ type PropsFunctionType = {
   onTextFormattingChange: CheckboxChangeHandlerType;
   onThemeChange: SelectChangeHandlerType<ThemeType>;
   onSigDemoInferenceProviderChange: SelectChangeHandlerType<SigDemoInferenceProviderType>;
+  onSigDemoMeshSelectionChange: (selectionId: string) => void;
+  onSigDemoMeshRefresh: () => void;
   onToggleNavTabsCollapse: (navTabsCollapsed: boolean) => void;
   onTypingIndicatorsChange: CheckboxChangeHandlerType;
   onUniversalExpireTimerChange: SelectChangeHandlerType<number>;
@@ -600,6 +609,8 @@ export function Preferences({
   onTextFormattingChange,
   onThemeChange,
   onSigDemoInferenceProviderChange,
+  onSigDemoMeshSelectionChange,
+  onSigDemoMeshRefresh,
   onToggleNavTabsCollapse,
   onTypingIndicatorsChange,
   onUniversalExpireTimerChange,
@@ -650,6 +661,11 @@ export function Preferences({
   theme,
   themeSetting,
   sigDemoInferenceProvider,
+  sigDemoMeshCatalog,
+  sigDemoMeshSelectionId,
+  sigDemoMeshLoading,
+  sigDemoMeshSaving,
+  sigDemoMeshError,
   universalExpireTimer,
   unreadCountBadgeType,
   validateBackup,
@@ -1050,6 +1066,18 @@ export function Preferences({
                 { label: 'ChatGPT', value: 'chatgpt' },
               ]}
             />
+            {sigDemoInferenceProvider !== 'chatgpt' && (
+              <PreferencesSigDemoMeshInference
+                i18n={i18n}
+                catalog={sigDemoMeshCatalog}
+                selectionId={sigDemoMeshSelectionId}
+                isLoading={sigDemoMeshLoading}
+                isSaving={sigDemoMeshSaving}
+                error={sigDemoMeshError}
+                onRefresh={onSigDemoMeshRefresh}
+                onSelectionChange={onSigDemoMeshSelectionChange}
+              />
+            )}
           </List>
         )}
         {weArePrimaryDevice && (

@@ -17,6 +17,12 @@ import { resolve, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { loadSigDemoPackageConfig } from './sig-demo-package-config.mjs';
+/* oxlint-disable signal-desktop/no-restricted-paths -- Packaging and the main process share private mesh configuration validation. */
+import {
+  parseSigDemoPaidMeshConfig,
+  serializeSigDemoPaidMeshConfig,
+} from '../ts/util/sigDemoMeshPaidConfig.std.ts';
+/* oxlint-enable signal-desktop/no-restricted-paths */
 
 const root = resolve(import.meta.dirname, '..');
 const args = process.argv.slice(2);
@@ -190,19 +196,21 @@ if (existsSync(paidMeshConfigPath)) {
   ) {
     throw new Error('The private paid mesh configuration is unusable.');
   }
-  const paid = JSON.parse(readFileSync(paidMeshConfigPath, 'utf8'));
-  if (
-    typeof paid.inviteToken !== 'string' ||
-    !/^[a-zA-Z0-9_-]{20,16384}$/.test(paid.inviteToken) ||
-    paid.model !== 'Qwen3.6-27B-Q6_K'
-  ) {
+  let paid;
+  try {
+    paid = parseSigDemoPaidMeshConfig(
+      JSON.parse(readFileSync(paidMeshConfigPath, 'utf8'))
+    );
+  } catch {
     throw new Error('The private paid mesh configuration is unusable.');
   }
   paidMeshResources = resolve(buildRoot, 'paid-mesh.json');
   writeFileSync(
     paidMeshResources,
-    `${JSON.stringify({ inviteToken: paid.inviteToken, model: paid.model })}\n`,
-    { mode: 0o600 }
+    `${serializeSigDemoPaidMeshConfig(paid)}\n`,
+    {
+      mode: 0o600,
+    }
   );
 } else if (paidMeshConfigRequired) {
   throw new Error('The private paid mesh configuration is missing.');

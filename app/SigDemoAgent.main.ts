@@ -60,6 +60,14 @@ const historySchema = z
       ) <= SIG_DEMO_AGENT_HISTORY_CANDIDATE_MAX_BYTES
   );
 const providerSchema = z.enum(['mesh-llm', 'mesh-llm-paid', 'chatgpt']);
+const meshSelectionSchema = z.string().max(4096);
+const configurationSchema = z.union([
+  providerSchema.transform(provider => ({ provider, selectionId: '' })),
+  z.object({
+    provider: providerSchema,
+    selectionId: meshSelectionSchema.default(''),
+  }),
+]);
 const requestSchema = z.object({
   requestId: z.string().uuid(),
   accountId: localIdSchema,
@@ -69,6 +77,7 @@ const requestSchema = z.object({
   sourceText: z.string().min(1).max(131_072),
   prompt: z.string().trim().min(1).max(65_536),
   provider: providerSchema,
+  meshSelectionId: meshSelectionSchema.optional(),
   author: authorSchema.optional(),
   history: historySchema.default([]),
 });
@@ -171,6 +180,7 @@ export function setupSigDemoAgent(
   const requestProviders = new Map<string, SigDemoInferenceProviderType>();
   const mesh = new SigDemoMesh();
   let selectedProvider = SIG_DEMO_DEFAULT_INFERENCE_PROVIDER;
+  let selectedMeshSelectionId = '';
   let selectionGeneration = 0;
   let nativeDrain: Promise<void> = Promise.resolve();
   let activeAccountId: string | undefined;
@@ -232,12 +242,20 @@ export function setupSigDemoAgent(
         throw new Error('The inference provider changed.');
       }
       return warmMeshInference(route);
-    });
+    }, selectedMeshSelectionId);
   };
-  const configureProvider = async (provider: SigDemoInferenceProviderType) => {
+  const configureProvider = async (
+    provider: SigDemoInferenceProviderType,
+    selectionId = ''
+  ) => {
+    const meshSelectionId = provider === 'chatgpt' ? '' : selectionId;
     const cancelled: Array<AgentTask> = [];
-    if (selectedProvider !== provider) {
+    if (
+      selectedProvider !== provider ||
+      selectedMeshSelectionId !== meshSelectionId
+    ) {
       selectedProvider = provider;
+      selectedMeshSelectionId = meshSelectionId;
       selectionGeneration += 1;
       // A free warmup must never survive a switch to the paid mesh. Also stop
       // old mesh questions before changing their loopback destination/policy.
@@ -273,7 +291,7 @@ export function setupSigDemoAgent(
     if (generation !== selectionGeneration) {
       throw new Error('The inference provider changed.');
     }
-    await mesh.configure(provider);
+    await mesh.configure(provider, meshSelectionId);
     if (generation !== selectionGeneration) {
       throw new Error('The inference provider changed.');
     }
@@ -294,17 +312,55 @@ export function setupSigDemoAgent(
     event.sender === getMainWebContents() &&
     event.senderFrame === event.sender.mainFrame;
   ipcMain.handle('sig-demo-agent:configure', async (event, value: unknown) => {
-    const provider = providerSchema.safeParse(value);
-    if (!isMainSender(event) || !provider.success) {
+    const configuration = configurationSchema.safeParse(value);
+    if (!isMainSender(event) || !configuration.success) {
       return { ok: false, error: 'This inference setting is unavailable.' };
     }
     try {
-      await configureProvider(provider.data);
+      await configureProvider(
+        configuration.data.provider,
+        configuration.data.selectionId
+      );
       return { ok: true };
     } catch {
       return {
         ok: false,
         error: 'The selected provider could not be prepared.',
+      };
+    }
+  });
+  ipcMain.handle('sig-demo-mesh:catalog', async (event, value: unknown) => {
+    const request = z
+      .object({ provider: z.enum(['mesh-llm', 'mesh-llm-paid']) })
+      .safeParse(value);
+    if (
+      !isMainSender(event) ||
+      !request.success ||
+      request.data.provider !== selectedProvider
+    ) {
+      return { ok: false, error: 'Select a mesh provider before refreshing.' };
+    }
+    const generation = selectionGeneration;
+    try {
+      await nativeDrain;
+      if (generation !== selectionGeneration) {
+        throw new Error('The selected node changed.');
+      }
+      // Discovery may start/await this selected client, but never runs a GDK
+      // warmup or inference. Paid catalog refreshes cannot spend wallet funds.
+      await mesh.configure(request.data.provider, selectedMeshSelectionId);
+      if (generation !== selectionGeneration) {
+        throw new Error('The selected node changed.');
+      }
+      const catalog = await mesh.getInferenceOptions(request.data.provider);
+      if (generation !== selectionGeneration) {
+        throw new Error('The selected node changed.');
+      }
+      return { ok: true, value: catalog };
+    } catch {
+      return {
+        ok: false,
+        error: 'The mesh catalog is unavailable. Refresh to try again.',
       };
     }
   });
@@ -362,6 +418,7 @@ export function setupSigDemoAgent(
       sourceText,
       prompt,
       provider,
+      meshSelectionId = '',
       author,
       history,
     } = parsed.data;
@@ -393,14 +450,17 @@ export function setupSigDemoAgent(
     requestProviders.set(requestId, provider);
     const generation = selectionGeneration;
     try {
-      if (provider !== selectedProvider) {
+      if (
+        provider !== selectedProvider ||
+        (provider !== 'chatgpt' && meshSelectionId !== selectedMeshSelectionId)
+      ) {
         throw new Error('The inference provider changed.');
       }
       await nativeDrain;
       if (generation !== selectionGeneration || !starting.has(requestId)) {
         throw new Error('The inference provider changed.');
       }
-      await mesh.configure(provider);
+      await mesh.configure(provider, meshSelectionId);
       if (
         generation !== selectionGeneration ||
         !starting.has(requestId) ||
@@ -420,13 +480,16 @@ export function setupSigDemoAgent(
       if (provider === 'mesh-llm') {
         inference = await prepareFreeInference();
       } else if (provider === 'mesh-llm-paid') {
-        inference = await mesh.getInference(provider);
+        inference = await mesh.getInference(provider, meshSelectionId);
       }
     } catch {
       starting.delete(requestId);
       requestProviders.delete(requestId);
       let error = 'Sig is not configured in this build.';
-      if (provider === 'mesh-llm-paid') {
+      if (provider !== 'chatgpt' && meshSelectionId) {
+        error =
+          'The selected model or node is unavailable. Choose another under General → Inference, or select Automatic.';
+      } else if (provider === 'mesh-llm-paid') {
         error =
           'Paid mesh inference is unavailable. Check Wallet and your connection, then try again.';
       } else if (provider === 'mesh-llm') {

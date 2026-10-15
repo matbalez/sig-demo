@@ -54,9 +54,23 @@ API path. ChatGPT requests do not load the Brave tool or receive its credential.
 is **mesh-llm**: a bundled client joins a randomly selected public mesh and picks
 an available free text-inference node at random. The selected node processes the
 question and bounded chat context. The second option, **mesh-llm (paid)**, joins the
-configured unlisted mesh and uses **Qwen3.6-27B-Q6_K** from an available paid host.
+configured unlisted mesh and uses its configured default paid host.
 **ChatGPT** uses the existing bundled OpenAI credential.
-The setting is saved on each Mac, and provider changes leave earlier replies intact.
+For either mesh option, **Model and node** offers **Automatic** or an explicit
+model/node pair. Free and paid choices are saved separately on each Mac. The
+list combines current mesh advertisements with configured private paid targets;
+each dropdown option displays advertised input/output prices per million tokens,
+with Free or Price unavailable when appropriate. Details include node identity,
+model, and available host/hardware,
+latency, version, and context information. Refresh reads discovery/status only.
+An explicit selection stays pinned to that model and node; an unavailable choice
+produces an error instead of silently routing elsewhere.
+
+The private build includes the Phala H200 target and the original paid node,
+with Phala as the configured paid default. Phala's GPU/TDX description is
+operator-configured hosting metadata. The client does not verify CPU/GPU TEE
+quotes; any displayed mesh release signature describes binary provenance only.
+Provider and node changes leave earlier replies and reusable chat sessions intact.
 If the mesh is unavailable, Sig reports that rather than silently sending the
 question to OpenAI.
 
@@ -87,8 +101,9 @@ The saved provider is prepared while the app opens. For free mesh, public bootst
 in parallel, and eligible bootstrap hints are cached for up to 24 hours to speed
 up later launches. An unavailable cache falls back to fresh public discovery.
 Startup also runs a small, synthetic GDK inference completion on the chosen free
-node to prepare its model and tool prompt before the first chat query. A slow or
+node to prepare its model and tool prompt before the first chat query. In Automatic mode, a slow or
 unavailable node is skipped in favor of one other randomly selected free host.
+An explicit free choice warms only the chosen node and model.
 The probe sends no chat history, uses no API credentials, and runs no web search.
 Questions share this preparation instead of starting a second cold request.
 Wallet seeds, the payment ledger, and plugin files remain in that profile's

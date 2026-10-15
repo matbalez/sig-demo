@@ -13,46 +13,87 @@ import { SIG_DEMO_DEFAULT_INFERENCE_PROVIDER } from '../types/SigDemoAgent.std.t
 import { itemStorage } from '../textsecure/Storage.preload.ts';
 import { drop } from '../util/drop.std.ts';
 import { createLogger } from '../logging/log.std.ts';
+import type {
+  SigDemoMeshCatalogResultType,
+  SigDemoMeshProviderType,
+} from '../types/SigDemoMesh.std.ts';
 
 const log = createLogger('sig demo inference');
 
+function getMeshSelection(provider: SigDemoInferenceProviderType): string {
+  if (provider === 'chatgpt') {
+    return '';
+  }
+  return itemStorage.get(
+    provider === 'mesh-llm'
+      ? 'sigDemoMeshFreeSelection'
+      : 'sigDemoMeshPaidSelection',
+    ''
+  );
+}
+
+/** Discovery/status only: this never submits an inference or funds a wallet. */
+export async function getSigDemoMeshCatalog(
+  provider: SigDemoMeshProviderType
+): Promise<SigDemoMeshCatalogResultType> {
+  if (!window.SignalContext.config.sigDemoEnabled) {
+    return { ok: false, error: 'Mesh selection is available in the demo.' };
+  }
+  try {
+    return await ipcRenderer.invoke('sig-demo-mesh:catalog', { provider });
+  } catch {
+    return { ok: false, error: 'The mesh catalog could not be refreshed.' };
+  }
+}
+
 /** Sync persisted selection before startup preparation and when it changes. */
 export async function configureSigDemoInferenceProvider(
-  provider: SigDemoInferenceProviderType
-): Promise<void> {
+  provider: SigDemoInferenceProviderType,
+  selectionId = getMeshSelection(provider)
+): Promise<Readonly<{ ok: boolean; error?: string }>> {
   if (!window.SignalContext.config.sigDemoEnabled) {
-    return;
+    return {
+      ok: false,
+      error: 'Inference settings are available in the demo.',
+    };
   }
   try {
     const result: { ok: boolean; error?: string } = await ipcRenderer.invoke(
       'sig-demo-agent:configure',
-      provider
+      { provider, selectionId: provider === 'chatgpt' ? '' : selectionId }
     );
     if (!result.ok) {
       // Query-time and wallet UI errors are actionable. Do not block normal
       // messaging because background mesh preparation is unavailable.
       log.info('Selected inference provider is not ready');
     }
+    return result;
   } catch {
     log.info('Selected inference provider could not be prepared');
+    return {
+      ok: false,
+      error: 'The selected model or node could not be prepared.',
+    };
   }
 }
 
 /** Only a locally submitted query calls this; received messages never run GDK. */
 export async function streamSigDemoAgent(
-  request: Omit<SigDemoAgentRunRequestType, 'provider'>,
+  request: Omit<SigDemoAgentRunRequestType, 'provider' | 'meshSelectionId'>,
   onText: (delta: string) => void,
   onStatus?: (status: SigDemoAgentStatusType) => void
 ): Promise<void> {
   if (!window.SignalContext.config.sigDemoEnabled) {
     throw new Error('Sig is available in the private demo.');
   }
+  const provider = itemStorage.get(
+    'sigDemoInferenceProvider',
+    SIG_DEMO_DEFAULT_INFERENCE_PROVIDER
+  );
   const agentRequest: SigDemoAgentRunRequestType = {
     ...request,
-    provider: itemStorage.get(
-      'sigDemoInferenceProvider',
-      SIG_DEMO_DEFAULT_INFERENCE_PROVIDER
-    ),
+    provider,
+    meshSelectionId: getMeshSelection(provider) || undefined,
   };
   return new Promise((resolve, reject) => {
     let finished = false;
