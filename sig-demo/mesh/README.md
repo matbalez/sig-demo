@@ -1,5 +1,15 @@
 # Bundled mesh-llm sidecar
 
+For an incident snapshot on a development Mac, leave the app open on the failing
+provider/node and run `sh scripts/collect-sig-demo-diagnostics.sh` before retrying
+or restarting. It saves a filtered JSON report under ignored
+`.sig-demo/diagnostics/`, including process ages, peer freshness, routing counters,
+and recent agent error references. It makes no inference or wallet requests and
+does not restart processes. The active network-diagnostics endpoint is excluded.
+No raw API responses, chat text, credentials, invitations, invoices, or network
+addresses are saved. This captures available evidence; it cannot reconstruct
+underlying paid error details already discarded by mesh-llm 0.78.1.
+
 sig demo bundles the official Apple Silicon [mesh-llm 0.78.1 release](https://github.com/Mesh-LLM/mesh-llm/releases/tag/v0.78.1).
 The source and redistribution license are Apache-2.0. `release.json` pins the
 archive and host checksums. Download and verify it before packaging:
