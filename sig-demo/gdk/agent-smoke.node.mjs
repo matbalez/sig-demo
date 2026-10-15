@@ -28,6 +28,43 @@ assert.ok(existsSync(libraryPath), 'Build the native agent first.');
 
 const ambientKey = 'sk-synthetic-ambient-never-send';
 const braveKey = 'synthetic-brave-never-send';
+const providerPrivateMarker = 'synthetic-private-provider-detail';
+const providerPrivateUrl = 'https://synthetic-private.test/never-expose';
+const providerRequestId = 'synthetic-private-provider-request-id';
+const providerErrorFixtures = new Map([
+  [
+    'known-server-error-mock',
+    {
+      status: 503,
+      message: `all 2 target(s) for model '${providerPrivateMarker}' failed`,
+      code: 'server-error',
+      httpStatus: 503,
+      reasonCode: 'mesh-routes-exhausted',
+    },
+  ],
+  [
+    'unknown-server-error-mock',
+    {
+      status: 503,
+      message: `${providerPrivateMarker} ${providerPrivateUrl} ${ambientKey} ${braveKey}`,
+      code: 'server-error',
+      httpStatus: 503,
+      reasonCode: null,
+    },
+  ],
+  [
+    'unknown-payment-error-mock',
+    {
+      status: 402,
+      message: `payment was not authorized: ${providerPrivateMarker} ${providerPrivateUrl}`,
+      code: 'payment-required',
+      // GDK's typed CreditsExhausted error does not retain the HTTP status.
+      httpStatus: null,
+      reasonCode: null,
+    },
+  ],
+]);
+const providerErrorBodies = new Map();
 process.env.OPENAI_API_KEY = ambientKey;
 process.env.BRAVE_SEARCH_API_KEY = braveKey;
 const target = 'a'.repeat(64);
@@ -112,6 +149,26 @@ const server = createServer(async (request, response) => {
         body.messages[0].content.includes('Answer only currentRequest.text')
       );
       assert.ok(body.messages[0].content.includes('quoted chat data'));
+    }
+    const providerError = providerErrorFixtures.get(body.model);
+    if (providerError) {
+      const errorBody = JSON.stringify({
+        error: {
+          message: providerError.message,
+          type:
+            providerError.status === 402 ? 'payment_required' : 'server_error',
+          privateDetails: `${ambientKey} ${braveKey} ${providerPrivateUrl}`,
+        },
+      });
+      providerErrorBodies.set(body.model, errorBody);
+      response.writeHead(providerError.status, {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(errorBody),
+        'x-request-id': providerRequestId,
+        Connection: 'close',
+      });
+      response.end(errorBody);
+      return;
     }
     response.writeHead(200, {
       'Content-Type': 'text/event-stream',
@@ -275,6 +332,58 @@ try {
   assert.equal(requests.filter(model => model === 'plain-mock').length, 1);
   assert.ok(ticks > 3, 'Native inference blocked the JavaScript event loop.');
   findings.oneInferenceAndNonblockingStreaming = true;
+  idle();
+
+  for (const [model, expected] of providerErrorFixtures) {
+    phase = model;
+    // Exercise the generated UniFFI event fields, not only Rust classifiers.
+    // oxlint-disable-next-line no-await-in-loop
+    events = await collect(await agent.start(config(model), request()));
+    const errors = events.filter(event => event.kind === 'Error');
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, expected.code);
+    assert.equal(errors[0].httpStatus, expected.httpStatus);
+    assert.equal(errors[0].reasonCode, expected.reasonCode);
+    assert.ok(!events.some(event => event.kind === 'Done'));
+    assert.ok(!events.some(event => event.kind === 'Text'));
+    const exposed = JSON.stringify(events, (_key, value) =>
+      typeof value === 'bigint' ? value.toString() : value
+    );
+    for (const privateValue of [
+      ambientKey,
+      braveKey,
+      providerPrivateMarker,
+      providerPrivateUrl,
+      providerRequestId,
+      baseUrl,
+      `${baseUrl}/chat/completions`,
+      providerErrorBodies.get(model),
+    ]) {
+      assert.equal(typeof privateValue, 'string');
+      assert.ok(
+        !exposed.includes(privateValue),
+        'Native provider diagnostics exposed private fixture data.'
+      );
+    }
+    idle();
+  }
+  findings.providerStatusAndAllowlistedReasonsSurviveNativeBindings = true;
+  findings.providerBodiesUrlsAndSecretsNeverReachNativeEvents = true;
+
+  phase = 'after-provider-errors';
+  events = await collect(
+    await agent.start(config('after-provider-errors-mock'), request())
+  );
+  assert.equal(
+    events
+      .filter(event => event.kind === 'Text')
+      .map(event => event.text)
+      .join(''),
+    'Hydrogen is first.'
+  );
+  assert.ok(events.some(event => event.kind === 'Done'));
+  assert.ok(!events.some(event => event.kind === 'Error'));
+  findings.successfulStreamingStillWorksAfterProviderErrors = true;
   idle();
 
   phase = 'native-context';

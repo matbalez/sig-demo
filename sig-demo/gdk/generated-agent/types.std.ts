@@ -32,7 +32,13 @@ export type SigAgentEvent =
   | Readonly<{ kind: 'Status'; status: SigAgentStatus }>
   | Readonly<{ kind: 'Timing'; phase: string; durationMs: number | bigint }>
   | Readonly<{ kind: 'Done' }>
-  | Readonly<{ kind: 'Error'; code: string; message: string }>;
+  | Readonly<{
+      kind: 'Error';
+      code: string;
+      message: string;
+      httpStatus?: number | null;
+      reasonCode?: string | null;
+    }>;
 export type SigAgentMode = 'Answer' | 'Warmup';
 export type SigAgentProvider = 'MeshLlm' | 'Chatgpt';
 export type SigAgentStatus = 'Responding' | 'Searching';

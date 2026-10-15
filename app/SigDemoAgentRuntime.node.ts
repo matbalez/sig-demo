@@ -256,7 +256,10 @@ export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
               break;
             }
             case 'Error':
-              throw new SigDemoAgentRuntimeError(event.message, event.code);
+              throw new SigDemoAgentRuntimeError(event.message, event.code, {
+                httpStatus: event.httpStatus,
+                reasonCode: event.reasonCode,
+              });
             case 'Done':
               complete = true;
               break;
@@ -286,6 +289,7 @@ export function createSigDemoAgentRuntime(agents: SigAgentBindings): Readonly<{
           externalSignal.aborted ? 'application-error' : 'timeout'
         );
       }
+      if (error instanceof SigDemoAgentRuntimeError) throw error;
       throw new SigDemoAgentRuntimeError(
         safeSigDemoAgentError(error),
         sigDemoAgentErrorCode(error)

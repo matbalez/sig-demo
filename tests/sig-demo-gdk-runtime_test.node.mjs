@@ -8,6 +8,7 @@ import { createSigDemoAgentRuntime } from '../app/SigDemoAgentRuntime.node.ts';
 import {
   safeSigDemoAgentError,
   sigDemoAgentErrorCode,
+  sigDemoAgentFailureDetails,
   SigDemoAgentRuntimeError,
 } from '../app/SigDemoAgentErrors.std.ts';
 
@@ -294,6 +295,73 @@ await test('native startup errors expose classifications without raw SDK diagnos
     error => error.message === 'Sig could not complete the request. Try again.'
   );
   assert.equal(runtime.lifecycle.disposed, 0);
+});
+
+await test('native HTTP503 and402 diagnostics survive runtime wrapping without inventing status or accepting raw reasons', async () => {
+  for (const fixture of [
+    {
+      code: 'server-error',
+      httpStatus: 503,
+      reasonCode: 'mesh-routes-exhausted',
+    },
+    {
+      code: 'payment-required',
+      httpStatus: 402,
+      reasonCode: 'payment-route-denied',
+    },
+    { code: 'server-error', httpStatus: undefined, reasonCode: undefined },
+    { code: 'payment-required', httpStatus: undefined, reasonCode: undefined },
+  ]) {
+    const runtime = mockAgent([
+      { kind: 'Error', message: 'Fixed native error.', ...fixture },
+    ]);
+    // Independent native errors must be observed through the complete adapter.
+    // oxlint-disable-next-line no-await-in-loop
+    await assert.rejects(runtime.run(), error => {
+      assert.ok(error instanceof SigDemoAgentRuntimeError);
+      assert.equal(error.code, fixture.code);
+      assert.equal(error.httpStatus, fixture.httpStatus);
+      assert.equal(error.reasonCode, fixture.reasonCode);
+      return true;
+    });
+    assert.equal(runtime.lifecycle.shutdown, 1);
+    assert.equal(runtime.lifecycle.disposed, 1);
+    assert.equal(runtime.starts.length, 1);
+  }
+  const error = new SigDemoAgentRuntimeError('Fixed message.', 'server-error', {
+    httpStatus: 999,
+    reasonCode: 'private-api-key-and-chat',
+  });
+  assert.equal(error.httpStatus, undefined);
+  assert.equal(error.reasonCode, undefined);
+});
+
+await test('diagnostic labels reject URLs, credentials, arbitrary phases and full node identities', () => {
+  const error = new SigDemoAgentRuntimeError('Fixed message.', 'server-error');
+  for (const model of [
+    'https://private.example/data',
+    'sk-proj-private-key',
+    'model\nprivate-chat',
+    'x'.repeat(97),
+  ]) {
+    const details = sigDemoAgentFailureDetails(error, {
+      provider: 'mesh-llm-paid',
+      phase: 'private phase',
+      model,
+      nodeId: `${route.targetNodeId}\nprivate-chat`,
+    });
+    assert.equal(details.model, undefined);
+    assert.equal(details.nodeId, undefined);
+    assert.equal(details.phase, 'runtime-starting');
+  }
+  assert.equal(
+    sigDemoAgentFailureDetails(error, {
+      provider: 'mesh-llm',
+      phase: 'model-turn',
+      nodeId: route.targetNodeId,
+    }).nodeId,
+    route.targetNodeId.slice(0, 10)
+  );
 });
 
 await test('cancellation cancels the native worker and drains it without more text or completion', async () => {

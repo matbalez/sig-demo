@@ -3,6 +3,7 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { Buffer } from 'node:buffer';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { app, ipcMain } from 'electron';
 import type { IpcMainInvokeEvent, WebContents } from 'electron';
@@ -27,9 +28,13 @@ import { createLogger } from '../ts/logging/log.std.ts';
 import { loadSigAgent } from '../sig-demo/gdk/agent-bindings.node.ts';
 import { createSigDemoAgentRuntime } from './SigDemoAgentRuntime.node.ts';
 import {
-  safeSigDemoAgentError,
-  sigDemoAgentErrorCode,
+  formatSigDemoAgentFailure,
+  sigDemoAgentFailureDetails,
+  sigDemoAgentSetupError,
+  SigDemoAgentRuntimeError,
+  type SigDemoAgentSetupPhaseType,
 } from './SigDemoAgentErrors.std.ts';
+import { parseSigDemoMeshOptionId } from '../ts/util/sigDemoMeshCatalog.std.ts';
 
 const log = createLogger('SigDemoAgent');
 const localIdSchema = z.string().min(1).max(256);
@@ -322,10 +327,23 @@ export function setupSigDemoAgent(
         configuration.data.selectionId
       );
       return { ok: true };
-    } catch {
+    } catch (error) {
+      const failure = sigDemoAgentSetupError(
+        error,
+        'provider-configuration',
+        configuration.data.provider,
+        Boolean(configuration.data.selectionId)
+      );
+      log.info(
+        'Inference setup failed',
+        sigDemoAgentFailureDetails(failure, {
+          provider: configuration.data.provider,
+          phase: 'provider-configuration',
+        })
+      );
       return {
         ok: false,
-        error: 'The selected provider could not be prepared.',
+        error: failure.message,
       };
     }
   });
@@ -439,13 +457,28 @@ export function setupSigDemoAgent(
       activeAccountId = accountId;
     }
     const requestedAt = performance.now();
+    // Independent of Signal's message, account, chat and encrypted frame IDs.
+    const diagnosticId = randomUUID().slice(0, 8);
     const send = (chunk: SigDemoAgentEventType) => {
       if (!event.sender.isDestroyed()) {
         event.sender.send('sig-demo-agent:event', chunk);
       }
     };
-    let runtime: ReturnType<typeof loadRuntime>;
+    let runtime: ReturnType<typeof loadRuntime> | undefined;
     let inference: Awaited<ReturnType<SigDemoMesh['getInference']>> | undefined;
+    let setupPhase: SigDemoAgentSetupPhaseType = 'provider-configuration';
+    const selection = parseSigDemoMeshOptionId(meshSelectionId);
+    const failureDetails = (error: unknown, phase: string) =>
+      sigDemoAgentFailureDetails(error, {
+        provider,
+        phase,
+        diagnosticId,
+        model:
+          provider === 'chatgpt'
+            ? (runtime?.model ?? SIG_DEMO_AGENT_MODEL)
+            : (inference?.model ?? selection?.model),
+        nodeId: inference?.targetNodeId ?? selection?.nodeId,
+      });
     starting.add(requestId);
     requestProviders.set(requestId, provider);
     const generation = selectionGeneration;
@@ -468,37 +501,34 @@ export function setupSigDemoAgent(
       ) {
         throw new Error('The inference provider changed.');
       }
+      setupPhase = 'runtime-configuration';
       runtime = loadRuntime(provider);
+      setupPhase = 'native-library';
       if (!existsSync(nativeLibrary())) {
-        starting.delete(requestId);
-        requestProviders.delete(requestId);
-        return {
-          ok: false,
-          error: 'The native Sig agent is missing from this build.',
-        };
+        throw new Error('The native Sig agent is missing from this build.');
       }
+      // Report loading/configuration failures before discovery's node fallback.
+      getRuntime();
+      setupPhase = 'inference-discovery';
       if (provider === 'mesh-llm') {
         inference = await prepareFreeInference();
       } else if (provider === 'mesh-llm-paid') {
         inference = await mesh.getInference(provider, meshSelectionId);
       }
-    } catch {
+    } catch (error) {
       starting.delete(requestId);
       requestProviders.delete(requestId);
-      let error = 'Sig is not configured in this build.';
-      if (provider !== 'chatgpt' && meshSelectionId) {
-        error =
-          'The selected model or node is unavailable. Choose another under General → Inference, or select Automatic.';
-      } else if (provider === 'mesh-llm-paid') {
-        error =
-          'Paid mesh inference is unavailable. Check Wallet and your connection, then try again.';
-      } else if (provider === 'mesh-llm') {
-        error =
-          'No public mesh node is available. Try again, or choose ChatGPT under General → Inference.';
-      }
+      const failure = sigDemoAgentSetupError(
+        error,
+        setupPhase,
+        provider,
+        Boolean(meshSelectionId)
+      );
+      const details = failureDetails(failure, setupPhase);
+      log.info('Inference setup failed', details);
       return {
         ok: false,
-        error,
+        error: formatSigDemoAgentFailure(failure, details),
       };
     }
     if (
@@ -525,27 +555,44 @@ export function setupSigDemoAgent(
     let receivedText = false;
     let modelTurns = 0;
     let lastPhase = 'runtime-starting';
-    const finish = (message?: string) => {
+    const finish = (error?: unknown) => {
       if (completed) {
         return;
       }
       completed = true;
       clearTimeout(timeout);
+      const failed = error !== undefined;
+      const details = failed ? failureDetails(error, lastPhase) : undefined;
+      if (details) {
+        log.info('Inference request failed', {
+          ...details,
+          modelTurns,
+        });
+      }
       log.info('Inference request finished', {
         provider,
         modelTurns,
-        result: message ? 'error' : 'complete',
+        result: failed ? 'error' : 'complete',
         totalMs: Math.round(performance.now() - requestedAt),
       });
       send(
-        message
-          ? { requestId, type: 'error', message }
+        details
+          ? {
+              requestId,
+              type: 'error',
+              message: formatSigDemoAgentFailure(error, details),
+            }
           : { requestId, type: 'done' }
       );
     };
     const timeout = setTimeout(() => {
       controller.abort();
-      finish('Sig took too long. Please try again.');
+      finish(
+        new SigDemoAgentRuntimeError(
+          'Sig took too long. Please try again.',
+          'timeout'
+        )
+      );
     }, 180_000);
     const execute = async () => {
       try {
@@ -561,9 +608,9 @@ export function setupSigDemoAgent(
             author,
             history,
             currentDate: new Date().toISOString().slice(0, 10),
-            ...(inference ?? { model: runtime.model }),
+            ...(inference ?? { model: runtime?.model }),
           },
-          { apiKey: runtime.apiKey, braveApiKey: runtime.braveApiKey },
+          { apiKey: runtime?.apiKey, braveApiKey: runtime?.braveApiKey },
           controller.signal,
           chunk => {
             if (completed) {
@@ -601,23 +648,21 @@ export function setupSigDemoAgent(
         );
         finish(
           controller.signal.aborted
-            ? 'Sig stopped before completing its response.'
+            ? new SigDemoAgentRuntimeError(
+                'Sig stopped before completing its response.'
+              )
             : undefined
         );
       } catch (error) {
-        // Native/provider diagnostics may contain prompts or credentials.
-        log.info('Inference request failed', {
-          provider,
-          phase: lastPhase,
-          modelTurns,
-          errorCode: controller.signal.aborted
-            ? 'cancelled'
-            : sigDemoAgentErrorCode(error),
-        });
         finish(
           controller.signal.aborted
-            ? 'Sig stopped before completing its response.'
-            : safeSigDemoAgentError(error)
+            ? new SigDemoAgentRuntimeError(
+                'Sig stopped before completing its response.'
+              )
+            : (error ??
+                new SigDemoAgentRuntimeError(
+                  'Sig could not complete the request. Try again.'
+                ))
         );
       } finally {
         // UI completion can precede teardown on a timeout. Keep the native job

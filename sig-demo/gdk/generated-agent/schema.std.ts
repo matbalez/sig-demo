@@ -130,6 +130,24 @@ export const uniffiSchema = {
                 kind: 'string',
               },
             },
+            {
+              name: 'http_status',
+              type: {
+                inner: {
+                  kind: 'uint16',
+                },
+                kind: 'optional',
+              },
+            },
+            {
+              name: 'reason_code',
+              type: {
+                inner: {
+                  kind: 'string',
+                },
+                kind: 'optional',
+              },
+            },
           ],
           name: 'Error',
         },

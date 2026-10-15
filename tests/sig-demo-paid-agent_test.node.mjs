@@ -41,7 +41,10 @@ const stubs = new Map([
     `export const existsSync = path => globalThis.${harnessKey}.exists(path);
      export const readFileSync = path => globalThis.${harnessKey}.read(path);`,
   ],
-  ['agent-bindings.node.ts', 'export const loadSigAgent = () => ({})'],
+  [
+    'agent-bindings.node.ts',
+    `export const loadSigAgent = () => globalThis.${harnessKey}.loadAgent()`,
+  ],
   [
     'SigDemoAgentRuntime.node.ts',
     `export const createSigDemoAgentRuntime = () => ({
@@ -151,6 +154,7 @@ function createHarness() {
     handle: (name, callback) => handlers.set(name, callback),
     on: (name, callback) => listeners.set(name, callback),
     exists: () => true,
+    loadAgent: () => ({}),
     read(path) {
       reads.push(path);
       if (path.endsWith('/.sig-demo/brave.env')) {
@@ -305,6 +309,9 @@ try {
         phase: 'model-turn',
         modelTurns: 1,
         errorCode: 'stream-format-invalid',
+        model: paidRoute.model,
+        nodeId: paidRoute.targetNodeId.slice(0, 10),
+        diagnosticId: failure?.[1].diagnosticId,
       });
       const logged = JSON.stringify(harness.logs);
       for (const privateValue of [
@@ -323,6 +330,269 @@ try {
             value.message.includes('unreadable response')
         )
       );
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('failed native HTTP requests include status, safe reason, route and phase in one reply', async () => {
+    for (const fixture of [
+      {
+        code: 'server-error',
+        httpStatus: 503,
+        reasonCode: 'mesh-routes-exhausted',
+        message:
+          'The inference provider returned a server error. Please try again.',
+      },
+      {
+        code: 'payment-required',
+        httpStatus: 402,
+        reasonCode: 'payment-route-denied',
+        message:
+          'Paid inference could not be authorized or started. Check Wallet and try again.',
+      },
+    ]) {
+      const harness = createHarness();
+      try {
+        harness.run = async (_request, _credentials, _signal, output) => {
+          output({ type: 'timing', phase: 'model-turn', durationMs: 0 });
+          throw new SigDemoAgentRuntimeError(
+            fixture.message,
+            fixture.code,
+            fixture
+          );
+        };
+        // The global IPC harness must run these fixtures sequentially.
+        // oxlint-disable-next-line no-await-in-loop
+        await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
+        // oxlint-disable-next-line no-await-in-loop
+        const start = await harness.invoke(
+          'sig-demo-agent:start',
+          question('mesh-llm-paid')
+        );
+        assert.equal(start.ok, true);
+        // oxlint-disable-next-line no-await-in-loop
+        await tick();
+        const failure = harness.events.find(
+          ({ value }) => value.type === 'error'
+        )?.value;
+        assert.ok(failure);
+        assert.ok(failure.message.startsWith(fixture.message));
+        assert.ok(failure.message.includes(`HTTP ${fixture.httpStatus}`));
+        assert.ok(failure.message.includes(`code=${fixture.code}`));
+        assert.ok(failure.message.includes(`reason=${fixture.reasonCode}`));
+        assert.ok(failure.message.includes(`model=${paidRoute.model}`));
+        assert.ok(
+          failure.message.includes(
+            `node=${paidRoute.targetNodeId.slice(0, 10)}`
+          )
+        );
+        assert.ok(failure.message.includes('phase=model-turn'));
+        assert.ok(!failure.message.includes(requestId));
+        const details = harness.logs.find(
+          ([message]) => message === 'Inference request failed'
+        )?.[1];
+        assert.equal(details.httpStatus, fixture.httpStatus);
+        assert.equal(details.reasonCode, fixture.reasonCode);
+        assert.match(details.diagnosticId, /^[a-f0-9]{8}$/);
+        assert.ok(failure.message.includes(`ref=${details.diagnosticId}`));
+        assert.equal(details.requestId, undefined);
+        assert.equal(
+          harness.events.filter(({ value }) => value.type === 'error').length,
+          1
+        );
+      } finally {
+        harness.cleanup();
+      }
+    }
+  });
+
+  await test('local setup errors retain their stage instead of claiming no public mesh node exists', async () => {
+    const harness = createHarness();
+    try {
+      harness.configureImpl = async () => {
+        throw new Error(
+          'A mesh port is already in use by another application.'
+        );
+      };
+      const result = await harness.invoke(
+        'sig-demo-agent:start',
+        question('mesh-llm')
+      );
+      assert.equal(result.ok, false);
+      assert.match(
+        result.error,
+        /Another application is using a local mesh port/
+      );
+      assert.match(result.error, /code=local-startup/);
+      assert.match(result.error, /reason=port-in-use/);
+      assert.match(result.error, /phase=provider-configuration/);
+      assert.ok(!result.error.includes('No public mesh node'));
+      assert.equal(harness.calls.length, 0);
+      assert.equal(harness.reads.length, 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('runtime configuration and unknown startup diagnostics never disclose raw errors', async () => {
+    const harness = createHarness();
+    const secret = 'sk-proj-private-key-and-private-chat';
+    try {
+      harness.configureImpl = async () => {
+        throw new Error(
+          `A mesh port is already in use by another application. ${secret}`
+        );
+      };
+      const startup = await harness.invoke(
+        'sig-demo-agent:start',
+        question('mesh-llm')
+      );
+      assert.match(startup.error, /code=local-startup/);
+      assert.ok(!startup.error.includes('port-in-use'));
+      harness.configureImpl = () => Promise.resolve();
+      harness.read = () => {
+        throw new Error(secret);
+      };
+      const configuration = await harness.invoke(
+        'sig-demo-agent:start',
+        question('mesh-llm')
+      );
+      assert.match(configuration.error, /code=configuration-error/);
+      assert.match(configuration.error, /phase=runtime-configuration/);
+      assert.ok(!configuration.error.includes('No public mesh node'));
+      assert.ok(
+        !JSON.stringify([startup, configuration, harness.logs]).includes(secret)
+      );
+      assert.equal(harness.calls.length, 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('missing or unloadable native libraries fail before mesh discovery with configuration diagnostics', async () => {
+    const harness = createHarness();
+    const secret = 'private-dlopen-path-and-credential';
+    try {
+      harness.exists = path => !path.endsWith('.dylib');
+      const missing = await harness.invoke(
+        'sig-demo-agent:start',
+        question('mesh-llm')
+      );
+      assert.match(missing.error, /code=configuration-error/);
+      assert.match(missing.error, /phase=native-library/);
+      harness.exists = () => true;
+      harness.loadAgent = () => {
+        throw new Error(secret);
+      };
+      const unloadable = await harness.invoke(
+        'sig-demo-agent:start',
+        question('mesh-llm')
+      );
+      assert.match(unloadable.error, /code=configuration-error/);
+      assert.match(unloadable.error, /phase=native-library/);
+      assert.ok(
+        !JSON.stringify([missing, unloadable, harness.logs]).includes(secret)
+      );
+      assert.ok(
+        !harness.records.some(([name]) => name === 'prepare-inference')
+      );
+      assert.equal(harness.calls.length, 0);
+    } finally {
+      harness.cleanup();
+    }
+  });
+
+  await test('real discovery failures retain free, paid and explicit-selection guidance', async () => {
+    for (const fixture of [
+      { provider: 'mesh-llm', expected: 'No public mesh node is available.' },
+      {
+        provider: 'mesh-llm-paid',
+        expected: 'Paid mesh inference is unavailable.',
+      },
+      {
+        provider: 'mesh-llm-paid',
+        selectionId: JSON.stringify([paidRoute.model, paidRoute.targetNodeId]),
+        expected: 'The selected model or node is unavailable.',
+      },
+    ]) {
+      const harness = createHarness();
+      const secret = 'private-discovery-response-with-api-key';
+      try {
+        // The global IPC harness must run these fixtures sequentially.
+        // oxlint-disable-next-line no-await-in-loop
+        await harness.invoke('sig-demo-agent:configure', {
+          provider: fixture.provider,
+          selectionId: fixture.selectionId,
+        });
+        harness.prepareImpl = async () => {
+          throw new Error(secret);
+        };
+        harness.inferenceImpl = async () => {
+          throw new Error(secret);
+        };
+        // oxlint-disable-next-line no-await-in-loop
+        const result = await harness.invoke('sig-demo-agent:start', {
+          ...question(fixture.provider),
+          meshSelectionId: fixture.selectionId,
+        });
+        assert.ok(result.error.startsWith(fixture.expected));
+        assert.match(result.error, /phase=inference-discovery/);
+        assert.ok(!JSON.stringify([result, harness.logs]).includes(secret));
+        assert.equal(harness.calls.length, 0);
+      } finally {
+        harness.cleanup();
+      }
+    }
+  });
+
+  await test('failed reply diagnostics omit prompt, credentials, raw errors and unsafe route metadata', async () => {
+    const harness = createHarness();
+    const secret = 'sk-proj-synthetic-private-key';
+    try {
+      await harness.invoke('sig-demo-agent:configure', 'mesh-llm-paid');
+      harness.inferenceImpl = async () => ({
+        ...paidRoute,
+        model: secret,
+        targetNodeId: `${'a'.repeat(64)}\n${secret}`,
+      });
+      harness.run = async () => {
+        throw new SigDemoAgentRuntimeError(
+          'The inference provider returned a server error. Please try again.',
+          'server-error',
+          { httpStatus: `503 ${secret}`, reasonCode: secret }
+        );
+      };
+      assert.equal(
+        (
+          await harness.invoke(
+            'sig-demo-agent:start',
+            question('mesh-llm-paid')
+          )
+        ).ok,
+        true
+      );
+      await tick();
+      const failure = harness.events.find(({ value }) => value.type === 'error')
+        ?.value.message;
+      assert.match(failure, /code=server-error/);
+      assert.ok(!failure.includes('HTTP'));
+      assert.ok(!failure.includes('model='));
+      assert.ok(!failure.includes('node='));
+      const exposed = JSON.stringify([harness.logs, harness.events]);
+      for (const privateValue of [
+        secret,
+        fakeBraveKey,
+        fakeOpenAIKey,
+        'arithmetic',
+        '2 + 3',
+        'local-account-a',
+        'chat-a',
+        'question-a',
+        'answer-a',
+      ]) {
+        assert.ok(!exposed.includes(privateValue));
+      }
     } finally {
       harness.cleanup();
     }

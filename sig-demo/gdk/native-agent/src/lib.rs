@@ -75,11 +75,23 @@ pub enum SigAgentStatus {
 
 #[derive(Clone, Debug, uniffi::Enum)]
 pub enum SigAgentEvent {
-    Text { text: String },
-    Status { status: SigAgentStatus },
-    Timing { phase: String, duration_ms: u64 },
+    Text {
+        text: String,
+    },
+    Status {
+        status: SigAgentStatus,
+    },
+    Timing {
+        phase: String,
+        duration_ms: u64,
+    },
     Done,
-    Error { code: String, message: String },
+    Error {
+        code: String,
+        message: String,
+        http_status: Option<u16>,
+        reason_code: Option<String>,
+    },
 }
 
 #[derive(Debug, thiserror::Error, uniffi::Error)]

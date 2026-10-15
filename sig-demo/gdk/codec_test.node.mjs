@@ -6,6 +6,7 @@ import { Buffer } from 'node:buffer';
 import { test } from 'node:test';
 import { WireCodec } from './codec.node.ts';
 import { uniffiSchema } from './generated/schema.std.ts';
+import { uniffiSchema as agentSchema } from './generated-agent/schema.std.ts';
 
 const codec = new WireCodec(uniffiSchema, {
   lowerObject() {
@@ -14,6 +15,29 @@ const codec = new WireCodec(uniffiSchema, {
   liftObject() {
     throw new Error('This wire fixture must not reference native objects.');
   },
+});
+
+await test('native error diagnostics use optional big-endian HTTP status fields', () => {
+  const agentCodec = new WireCodec(agentSchema, codec.objects);
+  const type = { kind: 'enum', name: 'SigAgentEvent' };
+  const bytes = Buffer.from(
+    '000000050000000c7365727665722d6572726f720000001050726f7669646572206661696c65642e0101f701000000106e6f64652d756e617661696c61626c65',
+    'hex'
+  );
+  const event = {
+    kind: 'Error',
+    code: 'server-error',
+    message: 'Provider failed.',
+    httpStatus: 503,
+    reasonCode: 'node-unavailable',
+  };
+  assert.deepEqual(agentCodec.decode(type, bytes), event);
+  assert.deepEqual(agentCodec.encode(type, event), bytes);
+  const withoutStatus = { ...event, httpStatus: null, reasonCode: null };
+  assert.deepEqual(
+    agentCodec.decode(type, agentCodec.encode(type, withoutStatus)),
+    withoutStatus
+  );
 });
 
 await test('UniFFI message fixture uses 1-based variants and UTF-8 byte lengths', () => {

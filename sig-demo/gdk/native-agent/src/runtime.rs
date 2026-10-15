@@ -790,6 +790,8 @@ pub(crate) async fn run(
         Err(failure) => flow.emit(SigAgentEvent::Error {
             code: failure.code.into(),
             message: failure.message.into(),
+            http_status: failure.http_status,
+            reason_code: failure.reason_code.map(String::from),
         }),
     }
 }

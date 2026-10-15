@@ -59,6 +59,13 @@ to full identities only when their prefixes are unambiguous. Availability means
 currently advertised, not a paid inference health check. Refresh never submits
 an inference request or creates a Lightning invoice.
 
+Failed Sig replies include a diagnostic category, the provider/model and short
+target node identity, and the phase that failed. An HTTP status appears only
+when retained by the native provider. Recognized payment and routing reasons
+use fixed labels; arbitrary response bodies and private invitations are not
+displayed. Startup and configuration errors remain separate from an empty
+discovery result. The main-process log retains the same safe diagnostic fields.
+
 Private builds can bundle several targets as
 `{defaultNodeId, nodes: [{id, inviteToken, model, expectedNodeId, label?, hosting?, hardware?}]}`.
 `defaultNodeId` is a full configured mesh key. Legacy single-target configurations

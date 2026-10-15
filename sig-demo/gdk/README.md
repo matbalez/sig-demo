@@ -83,6 +83,22 @@ The native agent only calls its loopback inference endpoint. The approved
 private demo keys remain in the packaged runtime configuration; mesh requests
 do not receive an OpenAI key, and the Brave key is sent only to Brave.
 
+## Error diagnostics
+
+Native errors retain a stable category, an HTTP status when the upstream GDK
+preserves it, and an optional recognized reason. Payment-required, server,
+authentication, rate-limit, context-limit, and request failures remain distinct.
+A typed error that has lost its original HTTP status does not invent one.
+Provider response bodies, request URLs, credentials, and chat content are never
+copied into the displayed error.
+
+The TypeScript adapter carries these fields through UniFFI and adds the failing
+phase, provider, bounded model label, and short mesh node identity to the reply.
+The main-process log records the same fields with the reply's diagnostic reference.
+Local sidecar startup and configuration failures are reported separately from
+discovery finding no eligible node. These diagnostics do not retry inference,
+change the selected provider, or alter wallet policy.
+
 ## Bindings and build
 
 `uniffi-runtime.node.ts` and `codec.node.ts` implement UniFFI buffers, records,
